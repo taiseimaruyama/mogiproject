@@ -1,4 +1,4 @@
-name: CI - Airflow PoC
+name: CI
 
 on:
   push:
@@ -10,68 +10,85 @@ jobs:
   e2e-test:
     runs-on: ubuntu-latest
 
-    env:
-      # AWS 認証情報
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-
-      # GCP 認証情報
-      GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp-key.json
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Write GCP credentials file
-        run: |
-          echo '${{ secrets.GCP_CREDENTIALS }}' > $GOOGLE_APPLICATION_CREDENTIALS
-
-      - name: Set up dependencies
+      - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose google-cloud-cli
-          pip install --upgrade pip
-          pip install awscli
+          sudo apt-get install -y docker-compose
 
       - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
-          echo "⏳ Waiting for Airflow services..."
+          echo "⏳ Waiting for containers to start..."
           sleep 60
+          docker ps -a
+
+      - name: Wait for Airflow scheduler to be ready
+        run: |
+          echo "⏳ Waiting for scheduler to start..."
+          for i in {1..20}; do
+            if docker ps --format "{{.Names}}" | grep "airflow-scheduler" > /dev/null; then
+              echo "✅ Scheduler is running"
+              break
+            fi
+            sleep 10
+          done
 
       - name: Initialize Airflow DB
         run: |
-          docker exec mogiproject_airflow-webserver_1 airflow db init
+          docker exec mogiproject_airflow-scheduler_1 airflow db init
 
       - name: Trigger DAG run
         run: |
-          docker exec mogiproject_airflow-webserver_1 airflow dags trigger -d industry_metrics_from_input
+          docker exec mogiproject_airflow-scheduler_1 airflow dags trigger -d industry_metrics_from_input
           echo "⏳ Waiting for DAG execution..."
           sleep 120
-          docker exec mogiproject_airflow-webserver_1 airflow dags state industry_metrics_from_input $(date +%Y-%m-%d)
 
       - name: Run pytest (check output files)
         run: |
           pip install pytest pandas
           pytest -v
 
-      # ===== 外部サービス転送確認 =====
+      # ====== AWS S3 アップロード確認 ======
+      - name: Install AWS CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          aws --version
 
       - name: Verify file uploaded to AWS S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ap-northeast-1
         run: |
-          echo "📦 Checking files in S3 bucket..."
-          aws s3 ls s3://my-s3-bucket/metrics/
+          aws s3 ls s3://domoproject/metrics/ads_metrics.csv
+
+      # ====== GCS アップロード確認 ======
+      - name: Install gcloud CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-cloud-cli
+          gcloud --version
+
+      - name: Authenticate to GCP
+        run: |
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > ${HOME}/gcp-key.json
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          gcloud config set project striking-yen-470200-u3
 
       - name: Verify file uploaded to GCS
         run: |
-          echo "📦 Checking files in GCS bucket..."
-          gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
+          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/retail_metrics.csv
 
+      # ====== BigQuery 確認 ======
       - name: Verify data loaded into BigQuery
         run: |
-          echo "📊 Checking tables in BigQuery dataset..."
-          bq ls $BIGQUERY_DATASET
+          bq query --use_legacy_sql=false \
+          "SELECT COUNT(*) as row_count FROM \`striking-yen-470200-u3.sales_dataset.retail_metrics\`"
