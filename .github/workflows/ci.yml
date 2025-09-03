@@ -9,91 +9,67 @@ on:
 jobs:
   e2e-test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: airflow
-          POSTGRES_PASSWORD: airflow
-          POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U airflow -d airflow"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:latest
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    env:
+      AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW__CORE__FERNET_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
 
     steps:
-      # 1. コード取得
       - uses: actions/checkout@v3
 
-      # 2. 依存関係インストール（修正版）
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y google-cloud-cli
-          pip install awscli
+          sudo apt-get install -y docker-compose python3-pip
+          pip install apache-airflow[gcp,aws]==2.7.2 pytest
 
-      # 3. Airflow 起動
       - name: Start Airflow with Docker Compose
-        run: docker compose up -d
+        run: docker-compose up -d
 
-      # 4. Airflow DB 初期化
       - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-scheduler airflow db init
+        run: docker-compose exec -T airflow-webserver airflow db init
 
-      # 5. Webserver 起動待ち
       - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..15}; do
-            if curl -s http://localhost:8080/health | grep '"status":"healthy"' ; then
-              echo "✅ Webserver is healthy"
+            if docker-compose logs airflow-webserver | grep -q "Listening at: http"; then
+              echo "Airflow Webserver is up!"
               exit 0
             fi
-            echo "⏳ Waiting for webserver... ($i/15)"
+            echo "Waiting for webserver... ($i/15)"
             sleep 10
           done
-          echo "❌ Webserver did not start in time"
+          echo "Webserver did not start in time"
           exit 1
 
-      # 6. DAG 実行
       - name: Trigger DAG run
-        run: docker compose run --rm airflow-scheduler airflow dags trigger industry_metrics_from_input
+        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
 
-      # 7. pytest 実行
       - name: Run pytest (check output files)
-        run: |
-          pip install -r requirements.txt
-          pytest -v tests/test_forecast.py
+        run: pytest tests/
 
-      # 8. S3 確認
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+
       - name: Verify file uploaded to AWS S3
-        run: |
-          aws s3 ls s3://$AWS_S3_BUCKET/metrics/ --recursive
+        run: aws s3 ls s3://your-s3-bucket-name/
 
-      # 9. GCP 認証 & GCS 確認
-      - name: Authenticate to GCP
-        run: echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > ${HOME}/gcp-key.json
+      - name: Install gcloud CLI
+        run: |
+          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
+          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
+          export PATH=$PATH:$HOME/google-cloud-sdk/bin
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Verify file uploaded to GCS
-        run: |
-          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
-          gsutil ls gs://$GCS_BUCKET/metrics/
+        run: gsutil ls gs://your-gcs-bucket-name/
 
-      # 10. BigQuery 確認
       - name: Verify data loaded into BigQuery
-        run: |
-          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
-          bq head -n 10 $BIGQUERY_DATASET.retail_metrics
+        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.sales_table\`"
