@@ -19,18 +19,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose curl
 
-      - name: Start Airflow with Docker Compose
+      - name: Start dependencies (Postgres/Redis)
         run: |
-          docker-compose up -d
-          echo "⏳ Waiting for Airflow containers to start..."
-          sleep 30
+          docker-compose up -d postgres redis
+          echo "⏳ Waiting for Postgres/Redis..."
+          sleep 20
           docker ps -a
 
       - name: Initialize Airflow DB
         run: |
-          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
-          echo "Initializing Airflow DB in $WEBSERVER"
-          docker exec $WEBSERVER airflow db init
+          echo "🚀 Initializing Airflow DB..."
+          docker-compose run --rm airflow-webserver airflow db init
+
+      - name: Start Airflow (webserver + scheduler)
+        run: |
+          docker-compose up -d airflow-webserver airflow-scheduler
+          echo "⏳ Waiting for Airflow webserver..."
+          sleep 60
+          docker ps -a
 
       - name: Wait for Airflow webserver to be ready
         run: |
