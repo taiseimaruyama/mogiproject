@@ -26,6 +26,12 @@ jobs:
           sleep 30
           docker ps -a
 
+      - name: Initialize Airflow DB
+        run: |
+          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
+          echo "Initializing Airflow DB in $WEBSERVER"
+          docker exec $WEBSERVER airflow db init
+
       - name: Wait for Airflow webserver to be ready
         run: |
           WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
