@@ -10,93 +10,89 @@ jobs:
   e2e-test:
     runs-on: ubuntu-latest
 
-    steps:
-      # 1. コードをチェックアウト
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: airflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U airflow -d airflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
-      # 2. 依存パッケージをインストール
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # 1. コード取得
+      - uses: actions/checkout@v3
+
+      # 2. 依存関係インストール
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-venv
+          sudo apt-get install -y docker-compose awscli google-cloud-cli
 
-      # 3. Docker Compose Plugin をインストール (方法2)
-      - name: Install Docker Compose plugin
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates curl gnupg lsb-release
-          sudo mkdir -m 0755 -p /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-          echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y docker-compose-plugin
-          docker compose version
-
-      # 4. Airflow を Docker Compose で起動
+      # 3. Airflow 起動
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
 
-      # 5. Airflow DB 初期化
+      # 4. Airflow DB 初期化 (修正ポイント: exec → run --rm)
       - name: Initialize Airflow DB
-        run: docker compose exec -T airflow-scheduler airflow db init
+        run: docker compose run --rm airflow-scheduler airflow db init
 
-      # 6. Webserver が立ち上がるのを待つ
+      # 5. Webserver 起動待ち
       - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..10}; do
-            if docker compose ps | grep "airflow-webserver" | grep "Up"; then
-              echo "Webserver is running!"
+          for i in {1..15}; do
+            if curl -s http://localhost:8080/health | grep '"status":"healthy"' ; then
+              echo "Webserver is healthy"
               exit 0
             fi
-            echo "⏳ Waiting for webserver... ($i/10)"
-            sleep 15
+            echo "⏳ Waiting for webserver... ($i/15)"
+            sleep 10
           done
           echo "❌ Webserver did not start in time"
           exit 1
 
-      # 7. DAG 実行トリガー
+      # 6. DAG 実行
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
+        run: docker compose run --rm airflow-scheduler airflow dags trigger industry_metrics_from_input
 
-      # 8. pytest 実行（出力ファイル検証）
+      # 7. pytest 実行
       - name: Run pytest (check output files)
         run: |
-          pip install pytest pandas
-          pytest tests/test_forecast.py -v
+          pip install -r requirements.txt
+          pytest -v tests/test_forecast.py
 
-      # 9. AWS CLI インストール
-      - name: Install AWS CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -q awscliv2.zip
-          sudo ./aws/install
-          aws --version
-
-      # 10. アップロード確認 (S3)
+      # 8. AWS CLI インストール済 → ファイル確認
       - name: Verify file uploaded to AWS S3
         run: |
-          aws s3 ls s3://${{ secrets.AWS_BUCKET }}/metrics/ --recursive
+          aws s3 ls s3://$AWS_S3_BUCKET/metrics/ --recursive
 
-      # 11. gcloud CLI インストール
-      - name: Install gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+      # 9. GCP 認証 & ファイル確認
+      - name: Authenticate to GCP
+        run: echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > ${HOME}/gcp-key.json
 
-      # 12. アップロード確認 (GCS)
       - name: Verify file uploaded to GCS
         run: |
-          gsutil ls gs://${{ secrets.GCS_BUCKET }}/metrics/
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          gsutil ls gs://$GCS_BUCKET/metrics/
 
-      # 13. BigQuery にロードされたか確認
+      # 10. BigQuery 確認
       - name: Verify data loaded into BigQuery
         run: |
-          bq query --nouse_legacy_sql \
-          'SELECT * FROM `${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BQ_DATASET }}.retail_metrics` LIMIT 10'
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          bq head -n 10 $BIGQUERY_DATASET.retail_metrics
