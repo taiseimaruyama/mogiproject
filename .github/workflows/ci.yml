@@ -51,14 +51,20 @@ jobs:
             sleep 10
           done
 
+      - name: List Airflow DAGs (debug)
+        run: |
+          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
+          echo "📋 Available DAGs:"
+          docker exec $WEBSERVER airflow dags list
+
       - name: Trigger Airflow DAG
         run: |
           WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
           echo "Triggering DAG in container: $WEBSERVER"
-          docker exec $WEBSERVER airflow dags trigger industry_metrics_full
+          docker exec $WEBSERVER airflow dags trigger industry_metrics_from_input
           echo "⏳ Waiting for DAG execution..."
           sleep 180
-          docker exec $WEBSERVER airflow dags list-runs -d industry_metrics_full --output json || true
+          docker exec $WEBSERVER airflow dags list-runs -d industry_metrics_from_input --output json || true
 
       - name: Run pytest (check output)
         run: |
