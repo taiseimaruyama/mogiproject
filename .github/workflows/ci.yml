@@ -1,1 +1,18 @@
+name: CI - Airflow PoC
+
+on: [push, pull_request]
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          sudo apt-get update && sudo apt-get install -y docker-compose
+          docker-compose up -d
+          sleep 60
+          docker exec airflow-webserver airflow dags trigger -d industry_metrics_full
+          sleep 120
+          pip install pytest pandas
+          pytest -v
 
