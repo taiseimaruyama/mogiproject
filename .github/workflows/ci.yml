@@ -29,10 +29,12 @@ jobs:
         run: |
           echo '${{ secrets.GCP_CREDENTIALS }}' > $GOOGLE_APPLICATION_CREDENTIALS
 
-      - name: Set up Docker Compose
+      - name: Set up dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose google-cloud-cli awscli
+          sudo apt-get install -y docker-compose google-cloud-cli
+          pip install --upgrade pip
+          pip install awscli
 
       - name: Start Airflow with Docker Compose
         run: |
