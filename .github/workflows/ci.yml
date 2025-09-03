@@ -17,54 +17,31 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose curl
+          sudo apt-get install -y docker-compose jq
 
-      - name: Start dependencies (Postgres/Redis)
+      - name: Configure GCP and AWS credentials
         run: |
-          docker-compose up -d postgres redis
-          echo "⏳ Waiting for Postgres/Redis..."
-          sleep 20
-          docker ps -a
+          mkdir -p ./keys
+          # GCPサービスアカウントキーをファイルに保存
+          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | jq '.' > ./keys/gcp-key.json
+          # AWSキーを環境変数に登録
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}" >> $GITHUB_ENV
 
-      - name: Initialize Airflow DB
+      - name: Start Airflow with Docker Compose
         run: |
-          echo "🚀 Initializing Airflow DB..."
-          docker-compose run --rm airflow-webserver airflow db init
-
-      - name: Start Airflow (webserver + scheduler)
-        run: |
-          docker-compose up -d airflow-webserver airflow-scheduler
-          echo "⏳ Waiting for Airflow webserver..."
+          docker-compose up -d
+          echo "⏳ Waiting for Airflow to start..."
           sleep 60
-          docker ps -a
-
-      - name: Wait for Airflow webserver to be ready
-        run: |
-          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
-          echo "Found Airflow webserver container: $WEBSERVER"
-          for i in {1..30}; do
-            if docker exec $WEBSERVER curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "✅ Airflow webserver is ready!"
-              break
-            fi
-            echo "⏳ Waiting for webserver... ($i)"
-            sleep 10
-          done
-
-      - name: List Airflow DAGs (debug)
-        run: |
-          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
-          echo "📋 Available DAGs:"
-          docker exec $WEBSERVER airflow dags list
 
       - name: Trigger Airflow DAG
         run: |
-          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
-          echo "Triggering DAG in container: $WEBSERVER"
-          docker exec $WEBSERVER airflow dags trigger industry_metrics_from_input
-          echo "⏳ Waiting for DAG execution..."
-          sleep 180
-          docker exec $WEBSERVER airflow dags list-runs -d industry_metrics_from_input --output json || true
+          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep airflow-webserver)
+          echo "Triggering DAG in container: $WEB_SERVER"
+          docker exec $WEB_SERVER airflow dags trigger -d industry_metrics_from_input
+          sleep 60
+          docker exec $WEB_SERVER airflow dags state industry_metrics_from_input $(date +%Y-%m-%d)
 
       - name: Run pytest (check output)
         run: |
