@@ -25,13 +25,19 @@ jobs:
           echo "⏳ Waiting for Airflow to start..."
           sleep 60
 
-      - name: Trigger DAG run
+      - name: Trigger Airflow DAG
         run: |
-          docker exec airflow-webserver airflow dags trigger -d industry_metrics_full
+          # Airflow Webserver コンテナ名を動的に取得
+          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
+          echo "Found Airflow webserver container: $WEBSERVER"
+
+          # DAGをトリガー
+          docker exec $WEBSERVER airflow dags trigger -d industry_metrics_full
           echo "⏳ Waiting for DAG execution..."
-          # DAG完了を待つ（Airflowは非同期実行なのでsleepで余裕を持たせる）
           sleep 180
-          docker exec airflow-webserver airflow dags state industry_metrics_full $(date +%Y-%m-%d) --output json || true
+
+          # 実行履歴を確認
+          docker exec $WEBSERVER airflow dags list-runs -d industry_metrics_full --output json || true
 
       - name: Run pytest (check output)
         run: |
