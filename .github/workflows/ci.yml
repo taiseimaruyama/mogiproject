@@ -39,17 +39,18 @@ jobs:
       # 1. コード取得
       - uses: actions/checkout@v3
 
-      # 2. 依存関係インストール
+      # 2. 依存関係インストール (修正版)
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose awscli google-cloud-cli
+          sudo apt-get install -y docker-compose-plugin google-cloud-cli
+          pip install awscli
 
       # 3. Airflow 起動
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
 
-      # 4. Airflow DB 初期化 (修正ポイント: exec → run --rm)
+      # 4. Airflow DB 初期化
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-scheduler airflow db init
 
@@ -77,12 +78,12 @@ jobs:
           pip install -r requirements.txt
           pytest -v tests/test_forecast.py
 
-      # 8. AWS CLI インストール済 → ファイル確認
+      # 8. S3 確認
       - name: Verify file uploaded to AWS S3
         run: |
           aws s3 ls s3://$AWS_S3_BUCKET/metrics/ --recursive
 
-      # 9. GCP 認証 & ファイル確認
+      # 9. GCP 認証 & GCS 確認
       - name: Authenticate to GCP
         run: echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > ${HOME}/gcp-key.json
 
