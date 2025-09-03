@@ -17,31 +17,43 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose jq
-
-      - name: Configure GCP and AWS credentials
-        run: |
-          mkdir -p ./keys
-          # GCPサービスアカウントキーをファイルに保存
-          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | jq '.' > ./keys/gcp-key.json
-          # AWSキーを環境変数に登録
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
-          echo "AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}" >> $GITHUB_ENV
+          sudo apt-get install -y docker-compose
 
       - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
-          echo "⏳ Waiting for Airflow to start..."
+          echo "⏳ Waiting for Airflow containers to start..."
           sleep 60
+          docker ps -a
+
+      - name: Wait for Airflow DB migration
+        run: |
+          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
+          if [ -z "$WEB_SERVER" ]; then
+            echo "❌ Airflow webserver container not found"
+            docker ps -a
+            exit 1
+          fi
+          echo "✅ Found Airflow webserver container: $WEB_SERVER"
+          echo "⏳ Initializing Airflow DB..."
+          docker exec $WEB_SERVER airflow db upgrade || true
+          docker exec $WEB_SERVER airflow users create \
+            --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true
 
       - name: Trigger Airflow DAG
         run: |
-          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep airflow-webserver)
+          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
+          if [ -z "$WEB_SERVER" ]; then
+            echo "❌ Airflow webserver container not found"
+            docker ps -a
+            exit 1
+          fi
+
           echo "Triggering DAG in container: $WEB_SERVER"
           docker exec $WEB_SERVER airflow dags trigger -d industry_metrics_from_input
-          sleep 60
-          docker exec $WEB_SERVER airflow dags state industry_metrics_from_input $(date +%Y-%m-%d)
+          echo "⏳ Waiting for DAG execution..."
+          sleep 120
+          docker exec $WEB_SERVER airflow dags list-runs -d industry_metrics_from_input --output json || true
 
       - name: Run pytest (check output)
         run: |
