@@ -1,10 +1,10 @@
-name: CI
+name: e2e-test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   e2e-test:
@@ -14,33 +14,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
 
       - name: Start Airflow with Docker Compose
         run: |
-          docker-compose up -d postgres redis
-          docker-compose up -d airflow-webserver airflow-scheduler
-          echo "⏳ Waiting for Airflow services..."
-          sleep 60
+          docker-compose up -d
+          docker ps -a
 
       - name: Initialize Airflow DB
         run: |
-          docker-compose run --rm airflow-cli db migrate
+          docker exec mogiproject_airflow-scheduler_1 airflow db init
 
       - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..10}; do
-            if docker logs mogiproject_airflow-webserver_1 2>&1 | grep -q "Listening at: http"; then
+          for i in {1..20}; do
+            if docker logs mogiproject_airflow-webserver_1 2>&1 | grep -q "Listening at:"; then
               echo "✅ Webserver is ready"
               exit 0
             fi
-            echo "⏳ Waiting for webserver... ($i/10)"
+            echo "⏳ Waiting for webserver... ($i/20)"
             sleep 15
           done
-          echo "❌ Webserver did not start in time"
+          echo "❌ Webserver did not start in time. Dumping logs..."
+          docker logs mogiproject_airflow-webserver_1
           exit 1
 
       - name: Trigger DAG run
@@ -50,10 +55,9 @@ jobs:
 
       - name: Run pytest (check output files)
         run: |
-          pip install pytest pandas
-          pytest -v
+          pytest -v tests/
 
-      # ---------- AWS S3 ----------
+      # --- AWS CLI & S3 検証 ---
       - name: Install AWS CLI
         run: |
           sudo apt-get update
@@ -65,23 +69,25 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ap-northeast-1
         run: |
-          aws s3 ls s3://my-s3-bucket/metrics/ads_metrics.csv
+          aws s3 ls s3://my-s3-bucket/metrics/ --recursive
 
-      # ---------- Google Cloud ----------
+      # --- GCP CLI & GCS 検証 ---
       - name: Install gcloud CLI
         run: |
-          sudo apt-get update && sudo apt-get install -y google-cloud-cli
+          sudo apt-get update
+          sudo apt-get install -y google-cloud-cli
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Verify file uploaded to GCS
         run: |
-          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/retail_metrics.csv
+          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
 
+      # --- BigQuery 検証 ---
       - name: Verify data loaded into BigQuery
         run: |
-          bq query --project_id=striking-yen-470200-u3 --nouse_legacy_sql \
-            'SELECT COUNT(*) AS cnt FROM `sales_dataset.retail_metrics`'
+          bq query --project_id=striking-yen-470200-u3 --use_legacy_sql=false \
+            "SELECT * FROM \`sales_dataset.retail_metrics\` LIMIT 5"
