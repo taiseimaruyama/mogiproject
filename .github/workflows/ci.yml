@@ -1,18 +1,39 @@
 name: CI - Airflow PoC
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   e2e-test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - run: |
-          sudo apt-get update && sudo apt-get install -y docker-compose
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Start Airflow with Docker Compose
+        run: |
           docker-compose up -d
+          echo "⏳ Waiting for Airflow to start..."
           sleep 60
+
+      - name: Trigger DAG run
+        run: |
           docker exec airflow-webserver airflow dags trigger -d industry_metrics_full
-          sleep 120
+          echo "⏳ Waiting for DAG execution..."
+          # DAG完了を待つ（Airflowは非同期実行なのでsleepで余裕を持たせる）
+          sleep 180
+          docker exec airflow-webserver airflow dags state industry_metrics_full $(date +%Y-%m-%d) --output json || true
+
+      - name: Run pytest (check output)
+        run: |
           pip install pytest pandas
           pytest -v
-
