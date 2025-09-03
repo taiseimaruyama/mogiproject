@@ -23,7 +23,7 @@ jobs:
         run: |
           docker-compose up -d
           echo "⏳ Waiting for Airflow to start..."
-          sleep 60
+          sleep 120
 
       - name: Trigger Airflow DAG
         run: |
