@@ -21,12 +21,30 @@ jobs:
 
       - name: Start Airflow with Docker Compose
         run: |
+          docker-compose up -d postgres redis
+          echo "⏳ Waiting for Postgres & Redis..."
+          sleep 20
           docker-compose up -d
-          echo "⏳ Waiting for Airflow containers to start..."
-          sleep 60
+          echo "⏳ Waiting for Airflow containers..."
+          sleep 40
           docker ps -a
 
-      - name: Wait for Airflow DB migration
+      - name: Initialize Airflow DB
+        run: |
+          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
+          if [ -z "$WEB_SERVER" ]; then
+            echo "❌ Airflow webserver container not found (before init)"
+            docker ps -a
+            exit 1
+          fi
+          echo "✅ Found Airflow webserver: $WEB_SERVER"
+          docker exec $WEB_SERVER airflow db upgrade
+          docker exec $WEB_SERVER airflow users create \
+            --username admin --password admin \
+            --firstname admin --lastname user \
+            --role Admin --email admin@example.com || true
+
+      - name: Wait for Airflow webserver to be ready
         run: |
           WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
           if [ -z "$WEB_SERVER" ]; then
@@ -34,26 +52,28 @@ jobs:
             docker ps -a
             exit 1
           fi
-          echo "✅ Found Airflow webserver container: $WEB_SERVER"
-          echo "⏳ Initializing Airflow DB..."
-          docker exec $WEB_SERVER airflow db upgrade || true
-          docker exec $WEB_SERVER airflow users create \
-            --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com || true
+          echo "⏳ Waiting for webserver..."
+          for i in {1..10}; do
+            if docker exec $WEB_SERVER airflow info > /dev/null 2>&1; then
+              echo "✅ Webserver is ready!"
+              break
+            fi
+            echo "⏳ Waiting ($i)..."
+            sleep 10
+          done
 
       - name: Trigger Airflow DAG
         run: |
           WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
           if [ -z "$WEB_SERVER" ]; then
-            echo "❌ Airflow webserver container not found"
+            echo "❌ Airflow webserver container not running"
             docker ps -a
             exit 1
           fi
-
-          echo "Triggering DAG in container: $WEB_SERVER"
-          docker exec $WEB_SERVER airflow dags trigger -d industry_metrics_from_input
-          echo "⏳ Waiting for DAG execution..."
-          sleep 120
-          docker exec $WEB_SERVER airflow dags list-runs -d industry_metrics_from_input --output json || true
+          echo "🚀 Triggering DAG in container: $WEB_SERVER"
+          docker exec $WEB_SERVER airflow dags trigger industry_metrics_from_input || true
+          sleep 30
+          docker exec $WEB_SERVER airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) || true
 
       - name: Run pytest (check output)
         run: |
