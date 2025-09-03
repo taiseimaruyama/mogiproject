@@ -27,7 +27,7 @@ jobs:
 
       - name: Start Airflow with Docker Compose
         run: |
-          docker-compose up -d
+          docker compose up -d
           docker ps -a
 
       - name: Initialize Airflow DB
