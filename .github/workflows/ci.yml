@@ -22,9 +22,13 @@ jobs:
       - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
-          echo "⏳ Waiting for Airflow containers..."
-          sleep 60
+          echo "⏳ Waiting for containers..."
+          sleep 30
           docker ps -a
+
+      - name: Initialize Airflow DB
+        run: |
+          docker-compose run --rm airflow-cli airflow db init
 
       - name: Wait for Airflow webserver to be ready
         run: |
