@@ -35,7 +35,6 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    user:"50000:0"
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
@@ -53,7 +52,6 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    user:"50000:0"
 
 volumes:
   postgres_data:
