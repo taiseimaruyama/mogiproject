@@ -10,52 +10,66 @@ jobs:
   e2e-test:
     runs-on: ubuntu-latest
 
+    env:
+      # AWS 認証情報
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # GCP 認証情報
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp-key.json
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Write GCP credentials file
+        run: |
+          echo '${{ secrets.GCP_CREDENTIALS }}' > $GOOGLE_APPLICATION_CREDENTIALS
+
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose
+          sudo apt-get install -y docker-compose google-cloud-cli awscli
 
-      - name: Start Postgres & Redis
-        run: |
-          docker-compose up -d postgres redis
-          echo "⏳ Waiting for Postgres & Redis..."
-          sleep 20
-          docker ps -a
-
-      - name: Initialize Airflow DB
-        run: |
-          echo "🚀 Initializing Airflow DB..."
-          docker-compose run --rm airflow-webserver airflow db upgrade
-          docker-compose run --rm airflow-webserver airflow users create \
-            --username admin --password admin \
-            --firstname admin --lastname user \
-            --role Admin --email admin@example.com || true
-
-      - name: Start Airflow (webserver + scheduler)
+      - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
           echo "⏳ Waiting for Airflow services..."
-          sleep 40
-          docker ps -a
+          sleep 60
 
-      - name: Trigger Airflow DAG
+      - name: Initialize Airflow DB
         run: |
-          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep webserver || true)
-          if [ -z "$WEB_SERVER" ]; then
-            echo "❌ Airflow webserver not running"
-            docker ps -a
-            exit 1
-          fi
-          echo "🚀 Triggering DAG in container: $WEB_SERVER"
-          docker exec $WEB_SERVER airflow dags trigger industry_metrics_from_input || true
-          sleep 30
-          docker exec $WEB_SERVER airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) || true
+          docker exec mogiproject_airflow-webserver_1 airflow db init
 
-      - name: Run pytest (check output)
+      - name: Trigger DAG run
+        run: |
+          docker exec mogiproject_airflow-webserver_1 airflow dags trigger -d industry_metrics_from_input
+          echo "⏳ Waiting for DAG execution..."
+          sleep 120
+          docker exec mogiproject_airflow-webserver_1 airflow dags state industry_metrics_from_input $(date +%Y-%m-%d)
+
+      - name: Run pytest (check output files)
         run: |
           pip install pytest pandas
           pytest -v
+
+      # ===== 外部サービス転送確認 =====
+
+      - name: Verify file uploaded to AWS S3
+        run: |
+          echo "📦 Checking files in S3 bucket..."
+          aws s3 ls s3://my-s3-bucket/metrics/
+
+      - name: Verify file uploaded to GCS
+        run: |
+          echo "📦 Checking files in GCS bucket..."
+          gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
+
+      - name: Verify data loaded into BigQuery
+        run: |
+          echo "📊 Checking tables in BigQuery dataset..."
+          bq ls $BIGQUERY_DATASET
