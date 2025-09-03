@@ -1,4 +1,4 @@
-version: "3"
+version: "3.8"
 
 services:
   postgres:
@@ -8,56 +8,89 @@ services:
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:latest
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
 
   airflow-webserver:
     image: apache/airflow:2.7.2
+    restart: always
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=1234567890abcdef1234567890abcdef
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=fernet_key_1234567890
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      # GCP認証
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp-key.json
-      # AWS認証
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./keys:/opt/airflow/keys:ro
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
     ports:
       - "8080:8080"
-    command: webserver
+    command: >
+      bash -c "
+      airflow webserver
+      "
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
+    restart: always
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=1234567890abcdef1234567890abcdef
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=fernet_key_1234567890
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      # GCP認証
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp-key.json
-      # AWS認証
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./keys:/opt/airflow/keys:ro
-    command: scheduler
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    command: >
+      bash -c "
+      airflow scheduler
+      "
+
+  airflow-cli:
+    image: apache/airflow:2.7.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    entrypoint: ["/bin/bash", "-c"]
 
 volumes:
-  postgres-db-volume:
+  postgres_data:
