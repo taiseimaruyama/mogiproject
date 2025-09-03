@@ -17,26 +17,35 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose
+          sudo apt-get install -y docker-compose curl
 
       - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
-          echo "⏳ Waiting for Airflow to start..."
-          sleep 120
+          echo "⏳ Waiting for Airflow containers to start..."
+          sleep 30
+          docker ps -a
+
+      - name: Wait for Airflow webserver to be ready
+        run: |
+          WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
+          echo "Found Airflow webserver container: $WEBSERVER"
+          for i in {1..30}; do
+            if docker exec $WEBSERVER curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
+              echo "✅ Airflow webserver is ready!"
+              break
+            fi
+            echo "⏳ Waiting for webserver... ($i)"
+            sleep 10
+          done
 
       - name: Trigger Airflow DAG
         run: |
-          # Airflow Webserver コンテナ名を動的に取得
           WEBSERVER=$(docker ps --format "{{.Names}}" | grep webserver)
-          echo "Found Airflow webserver container: $WEBSERVER"
-
-          # DAGをトリガー
+          echo "Triggering DAG in container: $WEBSERVER"
           docker exec $WEBSERVER airflow dags trigger -d industry_metrics_full
           echo "⏳ Waiting for DAG execution..."
           sleep 180
-
-          # 実行履歴を確認
           docker exec $WEBSERVER airflow dags list-runs -d industry_metrics_full --output json || true
 
       - name: Run pytest (check output)
