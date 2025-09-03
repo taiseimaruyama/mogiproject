@@ -1,37 +1,24 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.utils.task_group import TaskGroup
 from datetime import datetime, timedelta
 import pandas as pd
-import numpy as np
 import os
 
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
 
+INPUT_DIR = "/opt/airflow/input"   # ← 配置されたCSVを置く場所
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ---------- 小売業: データ生成 ----------
-def generate_retail_data():
-    days = pd.date_range("2024-01-01", "2024-03-31", freq="D")
-    df = pd.DataFrame({
-        "date": days,
-        "product_id": np.random.choice(["A", "B", "C"], size=len(days)),
-        "sales": np.random.randint(50, 200, size=len(days)),
-        "stock": np.random.randint(-5, 100, size=len(days)),  # マイナス在庫も混ぜる
-    })
-    df.to_csv(f"{OUTPUT_DIR}/retail.csv", index=False)
-
 # ---------- 小売業: 前処理 ----------
 def preprocess_retail():
-    df = pd.read_csv(f"{OUTPUT_DIR}/retail.csv", parse_dates=["date"])
-    # 在庫が負なら0に補正
+    df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
     df.loc[df["stock"] < 0, "stock"] = 0
     df.to_csv(f"{OUTPUT_DIR}/retail_clean.csv", index=False)
 
-# ---------- 小売業: データ検証 ----------
+# ---------- 小売業: 検証 ----------
 def validate_retail():
     df = pd.read_csv(f"{OUTPUT_DIR}/retail_clean.csv")
     assert (df["sales"] >= 0).all(), "❌ salesに負の値があります"
@@ -54,27 +41,14 @@ def calc_retail_metrics():
     }
     pd.DataFrame([metrics]).to_csv(f"{OUTPUT_DIR}/retail_metrics.csv", index=False)
 
-# ---------- 広告業: データ生成 ----------
-def generate_ads_data():
-    days = pd.date_range("2024-01-01", "2024-03-31", freq="D")
-    df = pd.DataFrame({
-        "date": days,
-        "campaign_id": np.random.choice(["CAMP1", "CAMP2"], size=len(days)),
-        "impressions": np.random.randint(1000, 5000, size=len(days)),
-        "clicks": np.random.randint(0, 500, size=len(days)),
-        "spend": np.random.uniform(1000, 5000, size=len(days)),
-        "revenue": np.random.uniform(2000, 8000, size=len(days)),
-    })
-    df.to_csv(f"{OUTPUT_DIR}/ads.csv", index=False)
-
 # ---------- 広告業: 前処理 ----------
 def preprocess_ads():
-    df = pd.read_csv(f"{OUTPUT_DIR}/ads.csv")
+    df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
     df.to_csv(f"{OUTPUT_DIR}/ads_clean.csv", index=False)
 
-# ---------- 広告業: データ検証 ----------
+# ---------- 広告業: 検証 ----------
 def validate_ads():
     df = pd.read_csv(f"{OUTPUT_DIR}/ads_clean.csv")
     assert (df["CTR"].between(0, 1)).all(), "❌ CTRが範囲外です"
@@ -100,18 +74,15 @@ default_args = {
 }
 
 with DAG(
-    dag_id="industry_metrics_full",
+    dag_id="industry_metrics_from_input",
     default_args=default_args,
-    description="Retail→BigQuery, Ads→S3 PoC with preprocessing & validation",
+    description="PoC: Retail & Ads KPI from existing CSV",
     schedule_interval="@daily",
     catchup=False,
-    concurrency=4,
-    max_active_runs=1,
-    tags=["poc", "retail", "ads", "bigquery", "s3", "validation"],
+    tags=["poc", "retail", "ads", "bigquery", "s3"],
 ) as dag:
 
-    # 小売業タスク
-    retail_generate = PythonOperator(task_id="generate_retail_data", python_callable=generate_retail_data)
+    # Retail
     retail_preprocess = PythonOperator(task_id="preprocess_retail", python_callable=preprocess_retail)
     retail_validate = PythonOperator(task_id="validate_retail", python_callable=validate_retail)
     retail_metrics = PythonOperator(task_id="calc_retail_metrics", python_callable=calc_retail_metrics)
@@ -137,8 +108,7 @@ with DAG(
         write_disposition="WRITE_TRUNCATE",
     )
 
-    # 広告業タスク
-    ads_generate = PythonOperator(task_id="generate_ads_data", python_callable=generate_ads_data)
+    # Ads
     ads_preprocess = PythonOperator(task_id="preprocess_ads", python_callable=preprocess_ads)
     ads_validate = PythonOperator(task_id="validate_ads", python_callable=validate_ads)
     ads_metrics = PythonOperator(task_id="calc_ads_metrics", python_callable=calc_ads_metrics)
@@ -152,6 +122,5 @@ with DAG(
     )
 
     # 依存関係
-    retail_generate >> retail_preprocess >> retail_validate >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
-    ads_generate >> ads_preprocess >> ads_validate >> ads_metrics >> upload_ads_to_s3
-
+    retail_preprocess >> retail_validate >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
+    ads_preprocess >> ads_validate >> ads_metrics >> upload_ads_to_s3
