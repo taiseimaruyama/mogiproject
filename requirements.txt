@@ -1,1 +1,8 @@
-
+pandas
+numpy
+matplotlib
+statsmodels
+apache-airflow
+apache-airflow-providers-google
+apache-airflow-providers-amazon
+pytest
