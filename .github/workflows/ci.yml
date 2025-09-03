@@ -39,11 +39,11 @@ jobs:
       # 1. コード取得
       - uses: actions/checkout@v3
 
-      # 2. 依存関係インストール (修正版)
+      # 2. 依存関係インストール（修正版）
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose-plugin google-cloud-cli
+          sudo apt-get install -y google-cloud-cli
           pip install awscli
 
       # 3. Airflow 起動
@@ -59,7 +59,7 @@ jobs:
         run: |
           for i in {1..15}; do
             if curl -s http://localhost:8080/health | grep '"status":"healthy"' ; then
-              echo "Webserver is healthy"
+              echo "✅ Webserver is healthy"
               exit 0
             fi
             echo "⏳ Waiting for webserver... ($i/15)"
