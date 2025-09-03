@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI
 
 on:
   push:
@@ -21,48 +21,43 @@ jobs:
 
       - name: Start Airflow with Docker Compose
         run: |
-          docker-compose up -d
-          echo "⏳ Waiting for Airflow to start..."
+          docker-compose up -d postgres redis
+          docker-compose up -d airflow-webserver airflow-scheduler
+          echo "⏳ Waiting for Airflow services..."
           sleep 60
 
       - name: Initialize Airflow DB
         run: |
-          docker-compose run --rm airflow-cli airflow db migrate
+          docker-compose run --rm airflow-cli db migrate
 
       - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..10}; do
-            if docker ps --format '{{.Names}}' | grep -q "airflow-webserver"; then
-              echo "✅ Airflow webserver is running"
-              break
+            if docker logs mogiproject_airflow-webserver_1 2>&1 | grep -q "Listening at: http"; then
+              echo "✅ Webserver is ready"
+              exit 0
             fi
-            echo "⏳ Waiting for webserver... ($i)"
+            echo "⏳ Waiting for webserver... ($i/10)"
             sleep 15
           done
+          echo "❌ Webserver did not start in time"
+          exit 1
 
       - name: Trigger DAG run
         run: |
-          WEB_SERVER=$(docker ps --format "{{.Names}}" | grep airflow-webserver)
-          docker exec $WEB_SERVER airflow dags trigger -d industry_metrics_from_input
-          echo "⏳ Waiting for DAG execution..."
-          sleep 120
-          docker exec $WEB_SERVER airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) --output json || true
+          docker exec mogiproject_airflow-webserver_1 \
+            airflow dags trigger -d industry_metrics_from_input
 
       - name: Run pytest (check output files)
         run: |
           pip install pytest pandas
           pytest -v
 
-      # =====================
-      # AWS S3
-      # =====================
+      # ---------- AWS S3 ----------
       - name: Install AWS CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip curl
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -q awscliv2.zip
-          sudo ./aws/install --update
+          sudo apt-get install -y awscli
 
       - name: Verify file uploaded to AWS S3
         env:
@@ -72,21 +67,15 @@ jobs:
         run: |
           aws s3 ls s3://my-s3-bucket/metrics/ads_metrics.csv
 
-      # =====================
-      # GCP GCS + BigQuery
-      # =====================
+      # ---------- Google Cloud ----------
       - name: Install gcloud CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y google-cloud-cli
+          sudo apt-get update && sudo apt-get install -y google-cloud-cli
 
       - name: Authenticate to GCP
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp-key.json
-        run: |
-          echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > $GOOGLE_APPLICATION_CREDENTIALS
-          gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-          gcloud config set project striking-yen-470200-u3
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Verify file uploaded to GCS
         run: |
@@ -94,5 +83,5 @@ jobs:
 
       - name: Verify data loaded into BigQuery
         run: |
-          bq query --use_legacy_sql=false \
-          "SELECT COUNT(*) as cnt FROM \`striking-yen-470200-u3.sales_dataset.retail_metrics\`"
+          bq query --project_id=striking-yen-470200-u3 --nouse_legacy_sql \
+            'SELECT COUNT(*) AS cnt FROM `sales_dataset.retail_metrics`'
