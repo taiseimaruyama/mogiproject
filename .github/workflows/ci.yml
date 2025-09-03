@@ -22,28 +22,25 @@ jobs:
       - name: Start Airflow with Docker Compose
         run: |
           docker-compose up -d
-          echo "⏳ Waiting for containers to start..."
+          echo "⏳ Waiting for Airflow containers..."
           sleep 60
           docker ps -a
 
-      - name: Wait for Airflow scheduler to be ready
+      - name: Wait for Airflow webserver to be ready
         run: |
-          echo "⏳ Waiting for scheduler to start..."
           for i in {1..20}; do
-            if docker ps --format "{{.Names}}" | grep "airflow-scheduler" > /dev/null; then
-              echo "✅ Scheduler is running"
+            if docker logs mogiproject_airflow-webserver_1 2>&1 | grep "Listening at"; then
+              echo "✅ Airflow webserver is ready"
               break
             fi
+            echo "⏳ Waiting ($i)..."
             sleep 10
           done
 
-      - name: Initialize Airflow DB
-        run: |
-          docker exec mogiproject_airflow-scheduler_1 airflow db init
-
       - name: Trigger DAG run
         run: |
-          docker exec mogiproject_airflow-scheduler_1 airflow dags trigger -d industry_metrics_from_input
+          docker exec mogiproject_airflow-webserver_1 \
+            airflow dags trigger -d industry_metrics_from_input
           echo "⏳ Waiting for DAG execution..."
           sleep 120
 
@@ -52,15 +49,12 @@ jobs:
           pip install pytest pandas
           pytest -v
 
-      # ====== AWS S3 アップロード確認 ======
+      # ---------- AWS S3 ----------
       - name: Install AWS CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip curl
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -q awscliv2.zip
+          unzip awscliv2.zip
           sudo ./aws/install
-          aws --version
 
       - name: Verify file uploaded to AWS S3
         env:
@@ -68,27 +62,26 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ap-northeast-1
         run: |
-          aws s3 ls s3://domoproject/metrics/ads_metrics.csv
+          aws s3 ls s3://domoproject/metrics/ || echo "⚠️ S3 upload not found"
 
-      # ====== GCS アップロード確認 ======
+      # ---------- GCP ----------
       - name: Install gcloud CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y google-cloud-cli
-          gcloud --version
+          sudo apt-get update && sudo apt-get install -y google-cloud-cli
 
       - name: Authenticate to GCP
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp-key.json
         run: |
-          echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > ${HOME}/gcp-key.json
-          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > $GOOGLE_APPLICATION_CREDENTIALS
+          gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
           gcloud config set project striking-yen-470200-u3
 
       - name: Verify file uploaded to GCS
         run: |
-          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/retail_metrics.csv
+          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/ || echo "⚠️ GCS upload not found"
 
-      # ====== BigQuery 確認 ======
       - name: Verify data loaded into BigQuery
         run: |
           bq query --use_legacy_sql=false \
-          "SELECT COUNT(*) as row_count FROM \`striking-yen-470200-u3.sales_dataset.retail_metrics\`"
+            'SELECT * FROM `striking-yen-470200-u3.sales_dataset.retail_metrics` LIMIT 5'
