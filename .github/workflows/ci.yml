@@ -4,15 +4,27 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   e2e-test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:13
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: airflow
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,21 +35,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
 
       - name: Start Airflow with Docker Compose
-        run: |
-          docker compose up -d
-          docker ps -a
+        run: docker-compose up -d
 
       - name: Initialize Airflow DB
         run: |
-          docker exec mogiproject_airflow-scheduler_1 airflow db init
+          docker exec airflow_scheduler airflow db init
 
       - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..20}; do
-            if docker logs mogiproject_airflow-webserver_1 2>&1 | grep -q "Listening at:"; then
+            if docker logs airflow_webserver 2>&1 | grep -q "Listening at:"; then
               echo "✅ Webserver is ready"
               exit 0
             fi
@@ -45,33 +54,33 @@ jobs:
             sleep 15
           done
           echo "❌ Webserver did not start in time. Dumping logs..."
-          docker logs mogiproject_airflow-webserver_1
+          docker logs airflow_webserver
           exit 1
 
       - name: Trigger DAG run
         run: |
-          docker exec mogiproject_airflow-webserver_1 \
+          docker exec airflow_webserver \
             airflow dags trigger -d industry_metrics_from_input
 
       - name: Run pytest (check output files)
-        run: |
-          pytest -v tests/
+        run: pytest tests/
 
-      # --- AWS CLI & S3 検証 ---
+      # AWS CLI
       - name: Install AWS CLI
         run: |
           sudo apt-get update
           sudo apt-get install -y awscli
 
       - name: Verify file uploaded to AWS S3
+        run: |
+          aws s3 ls s3://$AWS_S3_BUCKET/metrics/ --region $AWS_REGION
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ap-northeast-1
-        run: |
-          aws s3 ls s3://my-s3-bucket/metrics/ --recursive
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
 
-      # --- GCP CLI & GCS 検証 ---
+      # GCP CLI
       - name: Install gcloud CLI
         run: |
           sudo apt-get update
@@ -80,14 +89,15 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
       - name: Verify file uploaded to GCS
         run: |
-          gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
+          gsutil ls gs://$GCS_BUCKET/metrics/
+        env:
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
 
-      # --- BigQuery 検証 ---
       - name: Verify data loaded into BigQuery
         run: |
-          bq query --project_id=striking-yen-470200-u3 --use_legacy_sql=false \
-            "SELECT * FROM \`sales_dataset.retail_metrics\` LIMIT 5"
+          bq query --use_legacy_sql=false \
+          "SELECT * FROM \`${{ secrets.BQ_PROJECT }}.${{ secrets.BQ_DATASET }}.retail_metrics\` LIMIT 5"
