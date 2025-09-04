@@ -1,3 +1,5 @@
+version: '3'
+
 services:
   postgres:
     image: postgres:13
@@ -16,7 +18,7 @@ services:
     command: webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__FERNET_KEY=your_random_key_here  # 固定キー or CIでランダム生成
+      - AIRFLOW__CORE__FERNET_KEY=0123456789abcdef0123456789abcdef
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
@@ -28,6 +30,10 @@ services:
       - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
       - ./variables.json:/opt/airflow/variables.json
+    deploy:
+      resources:
+        limits:
+          memory: 2g   # GitHub Actions の runner で OOM しにくくする
     depends_on:
       - postgres
       - redis
