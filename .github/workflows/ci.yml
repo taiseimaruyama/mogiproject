@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Prepare host dirs   # ← 追加
+        run: |
+          mkdir -p dags logs plugins output
+          chmod -R 777 dags logs plugins output
+
       - name: Install dependencies
         run: |
           sudo apt-get update
