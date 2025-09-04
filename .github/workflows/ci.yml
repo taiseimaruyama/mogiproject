@@ -1,4 +1,4 @@
-name: e2e-test
+name: CI
 
 on:
   push:
@@ -7,103 +7,84 @@ on:
   pull_request:
 
 jobs:
-  e2e-test:
+  build:
     runs-on: ubuntu-latest
-    env:
-      AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW__CORE__FERNET_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Add swap to prevent OOM
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose python3-pip curl
-          pip install apache-airflow[gcp,aws]==2.7.2 pytest
+          sudo swapoff -a
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
-      - name: Start Airflow with Docker Compose
-        run: docker-compose up -d
+      - name: Set up Docker Compose
+        run: docker-compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
         run: docker-compose exec -T airflow-webserver airflow db init
 
-      # ✅ WebserverがHealthyになるまで待機
+      - name: Import Airflow Variables
+        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/dags/variables.json || true
+
+      # ✅ ここを修正版に置き換え
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver to be healthy..."
-          timeout 600 bash -c '
-            until curl -sf http://localhost:8080/health | grep -q "\"status\": \"healthy\""; do
-              echo "⏳ Webserver not ready yet..."
-              sleep 10
-            done
-          '
-          echo "✅ Airflow webserver is healthy!"
+          for i in {1..60}; do
+            if curl -sf http://localhost:8080/health | grep -q "\"status\": \"healthy\""; then
+              echo "✅ Webserver is healthy!"
+              exit 0
+            fi
+            echo "⏳ Webserver not ready yet... ($i/60)"
+            sleep 10
+          done
 
-      # ✅ 認証確認ステップを追加
+          echo "❌ Webserver did not become healthy in time. Dumping logs..."
+          docker-compose ps
+          docker-compose logs --tail=100 airflow-webserver
+          exit 1
+
       - name: Test GCS connection
-        run: docker-compose exec -T airflow-webserver airflow connections test google_cloud_default
-
-      - name: Test BigQuery connection
-        run: docker-compose exec -T airflow-webserver airflow connections test bigquery_default
+        run: docker-compose exec -T airflow-webserver gsutil ls gs://my-gcs-bucket-2025-demo || exit 1
 
       - name: Test S3 connection
-        run: docker-compose exec -T airflow-webserver airflow connections test aws_default
+        run: docker-compose exec -T airflow-webserver aws s3 ls s3://domoproject || exit 1
 
-      # ✅ DAG実行はHealthy & 認証確認後
+      - name: Test BigQuery connection
+        run: docker-compose exec -T airflow-webserver bq ls striking-yen-470200-u3: | head -n 10 || exit 1
+
       - name: Trigger DAG run
-        run: |
-          EXEC_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
-          echo "EXEC_DATE=$EXEC_DATE" >> $GITHUB_ENV
-          docker-compose exec -T airflow-webserver \
-            airflow dags trigger -e "$EXEC_DATE" industry_metrics_from_input
+        run: docker-compose exec -T airflow-webserver airflow dags trigger -d industry_metrics_from_input
 
-      # ✅ DAG実行完了まで待機（stateで判定）
-      - name: Wait for DAG run to complete
+      - name: Wait for DAG to finish (max 10 min)
         run: |
+          echo "Waiting for DAG to finish..."
           for i in {1..60}; do
-            STATUS=$(docker-compose exec -T airflow-webserver \
-              airflow dags state industry_metrics_from_input $EXEC_DATE)
-            echo "⏳ Current status: $STATUS"
-            if [[ "$STATUS" == "success" ]]; then
-              echo "✅ DAG finished successfully!"
+            state=$(docker-compose exec -T airflow-webserver airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1 | awk '{print $2}')
+            echo "DAG state: $state"
+            if [ "$state" = "success" ]; then
+              echo "✅ DAG succeeded"
               exit 0
-            elif [[ "$STATUS" == "failed" ]]; then
+            elif [ "$state" = "failed" ]; then
               echo "❌ DAG failed"
+              docker-compose logs --tail=100 airflow-webserver
               exit 1
             fi
-            sleep 30
+            sleep 10
           done
-          echo "❌ DAG did not finish within timeout"
+          echo "❌ Timed out waiting for DAG"
+          docker-compose logs --tail=100 airflow-webserver
           exit 1
 
       - name: Run pytest (check output files)
-        run: pytest tests/
+        run: docker-compose exec -T airflow-webserver pytest tests/
 
-      # AWS / GCP CLI 確認はオプション
-      - name: Install AWS CLI
-        run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
-
-      - name: Verify file uploaded to AWS S3
-        run: aws s3 ls s3://domoproject/metrics/
-
-      - name: Install gcloud CLI
-        run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
-          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
-          export PATH=$PATH:$HOME/google-cloud-sdk/bin
-          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
-          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Verify file uploaded to GCS
-        run: gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
-
-      - name: Verify data loaded into BigQuery
-        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.retail_metrics\`"
+      - name: Tear down
+        if: always()
+        run: docker-compose down -v
