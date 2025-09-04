@@ -23,18 +23,18 @@ jobs:
           free -h
 
       - name: Set up Docker Compose
-        run: docker-compose -f docker-compose.yml up -d
+        run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-webserver airflow db migrate
+        run: docker compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
-        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
       - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..30}; do
-            if docker-compose exec -T airflow-webserver curl -f http://localhost:8080/health; then
+            if docker compose exec -T airflow-webserver curl -f http://localhost:8080/health; then
               echo "Airflow Webserver is ready!"
               exit 0
             fi
@@ -44,11 +44,11 @@ jobs:
           exit 1
 
       - name: Trigger DAG run
-        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
+        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
-        run: docker-compose exec -T airflow-webserver pytest tests/
+        run: docker compose exec -T airflow-webserver pytest tests/
 
       - name: Tear down
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
