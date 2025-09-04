@@ -1,5 +1,18 @@
 version: '3.8'
 
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.7.2
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+    - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"   # 👈 追加: 権限問題を解消
+
 services:
   postgres:
     image: postgres:13
@@ -18,42 +31,22 @@ services:
       - "6379:6379"
 
   airflow-webserver:
-    image: apache/airflow:2.7.2
+    <<: *airflow-common
     command: webserver
     restart: always
     depends_on:
       - postgres
       - redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
     ports:
       - "8080:8080"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-    user: "${AIRFLOW_UID:-50000}:0"   # 👈 修正: 権限問題回避用
 
   airflow-scheduler:
-    image: apache/airflow:2.7.2
+    <<: *airflow-common
     command: scheduler
     restart: always
     depends_on:
       - postgres
       - redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-    user: "${AIRFLOW_UID:-50000}:0"   # 👈 修正: 権限問題回避用
 
 volumes:
   postgres_data:
