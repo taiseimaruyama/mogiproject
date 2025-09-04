@@ -1,10 +1,10 @@
-name: e2e-test
+name: Airflow CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -14,45 +14,58 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Swap拡張（メモリ不足対策）
       - name: Add swap to prevent OOM
         run: |
           sudo swapoff -a
-          sudo fallocate -l 6G /swapfile
+          sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v2
+      # Fernet Key を毎回生成
+      - name: Generate Fernet Key
+        id: fernet
+        run: |
+          pip install cryptography
+          echo "FERNET_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> $GITHUB_ENV
 
-      - name: Start services with Docker Compose
+      # Docker Compose 起動
+      - name: Set up Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
+      # Airflow DB 初期化
       - name: Initialize Airflow DB
         run: docker compose exec -T airflow-webserver airflow db init
 
+      # Airflow Variables を読み込み
       - name: Import Airflow Variables
         run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
-      - name: Wait for Airflow webserver
+      # Webserver 起動待機
+      - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health; then
-              echo "Airflow Webserver is ready"
+            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
+              echo "Airflow Webserver is ready!"
               exit 0
             fi
             echo "Waiting for Airflow Webserver..."
             sleep 10
           done
+          echo "Airflow Webserver did not become ready in time."
           exit 1
 
+      # DAG 実行テスト
       - name: Trigger DAG run
         run: docker compose exec -T airflow-webserver airflow dags trigger -d test_dag
 
+      # 出力ファイル確認 (pytest)
       - name: Run pytest (check output files)
-        run: pytest tests/
+        run: docker compose exec -T airflow-webserver pytest tests/
 
+      # 終了処理
       - name: Tear down
         if: always()
         run: docker compose down -v
