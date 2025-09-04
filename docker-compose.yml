@@ -1,42 +1,74 @@
-version: '3'
+version: '3.8'
 
 services:
   postgres:
     image: postgres:13
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
     volumes:
-      - postgres_db:/var/lib/postgresql/data
-
-  redis:
-    image: redis:6
-
-  airflow-webserver:
-    image: apache/airflow:2.7.1
-    command: webserver
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__FERNET_KEY=0123456789abcdef0123456789abcdef
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./output:/opt/airflow/output
-      - ./input:/opt/airflow/input
-      - ./variables.json:/opt/airflow/variables.json
+      - postgres-db-volume:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
-          memory: 2g   # GitHub Actions の runner で OOM しにくくする
+          memory: 512m
+
+  redis:
+    image: redis:6
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  airflow-webserver:
+    image: apache/airflow:2.7.1
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
     depends_on:
       - postgres
       - redis
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
+    ports:
+      - "8080:8080"
+    command: webserver
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key
+    depends_on:
+      - airflow-webserver
+      - postgres
+      - redis
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
+    command: scheduler
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
 volumes:
-  postgres_db:
+  postgres-db-volume:
