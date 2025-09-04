@@ -17,13 +17,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # GCP 認証 (Secrets 使用)
+      # GCP 認証
       - name: Set up GCP credentials
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
-      # AWS 認証 (Secrets 使用)
+      # AWS 認証
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -39,7 +39,6 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # docker compose に統一済み
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
