@@ -1,3 +1,5 @@
+version: '3.9'
+
 services:
   postgres:
     image: postgres:13
@@ -10,6 +12,28 @@ services:
 
   redis:
     image: redis:latest
+
+  airflow-init:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
+    command: bash -c "airflow db init && airflow users create \
+                      --username admin \
+                      --firstname Admin \
+                      --lastname User \
+                      --role Admin \
+                      --email admin@example.com \
+                      --password admin || true"
 
   airflow-webserver:
     image: apache/airflow:2.6.3
@@ -26,8 +50,8 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./variables.json:/opt/airflow/variables.json
-      - ./requirements.txt:/requirements.txt   # 👈 pytest インストール用
-      - ./tests:/opt/airflow/tests             # 👈 テストコードをコンテナ内にマウント
+      - ./requirements.txt:/requirements.txt
+      - ./tests:/opt/airflow/tests
     command: bash -c "pip install -r /requirements.txt && airflow webserver"
 
   airflow-scheduler:
@@ -45,8 +69,8 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./variables.json:/opt/airflow/variables.json
-      - ./requirements.txt:/requirements.txt   # 👈 pytest インストール用
-      - ./tests:/opt/airflow/tests             # 👈 テストコードをコンテナ内にマウント
+      - ./requirements.txt:/requirements.txt
+      - ./tests:/opt/airflow/tests
     command: bash -c "pip install -r /requirements.txt && airflow scheduler"
 
 volumes:
