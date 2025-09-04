@@ -42,18 +42,33 @@ jobs:
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
+      # 改良版: Webserver のヘルスチェック & ログ追従
       - name: Wait for Airflow webserver to be healthy
         run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "Airflow webserver is healthy!"
-              exit 0
+          echo "Waiting for Airflow webserver..."
+          docker compose logs -f airflow-webserver &
+          LOGS_PID=$!
+          timeout=600
+          interval=10
+          elapsed=0
+          healthy=false
+          while [ $elapsed -lt $timeout ]; do
+            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
+              echo "✅ Airflow webserver is healthy"
+              healthy=true
+              break
+            else
+              echo "⏳ Webserver not ready yet..."
             fi
-            echo "Waiting for Airflow webserver..."
-            sleep 10
+            sleep $interval
+            elapsed=$((elapsed + interval))
           done
-          echo "Airflow webserver did not become healthy in time."
-          exit 1
+          kill $LOGS_PID || true
+          if [ "$healthy" = false ]; then
+            echo "❌ Airflow webserver did not become healthy in time"
+            docker compose logs airflow-webserver
+            exit 1
+          fi
 
       - name: Test GCS connection
         run: |
