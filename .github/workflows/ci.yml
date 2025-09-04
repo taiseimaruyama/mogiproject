@@ -2,86 +2,120 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Set up job
+        run: echo "🚀 Starting CI job..."
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Add swap to prevent OOM
         run: |
-          sudo swapoff -a
+          echo "Adding 10GB swap..."
           sudo fallocate -l 10G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: Generate FERNET_KEY
-        run: echo "FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
-
       - name: Set up Docker Compose
-        run: docker compose -f docker-compose.yml up -d
-
-      - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-init
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+          docker-compose -f docker-compose.yml up -d
 
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
-          for i in {1..60}; do
-            if docker compose ps airflow-webserver | grep -q "Up"; then
-              if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
-                echo "✅ Airflow webserver is healthy"
-                exit 0
-              fi
+          # follow logs in background (リアルタイム表示用)
+          docker-compose logs -f airflow-webserver &
+          LOGS_PID=$!
+
+          timeout=600   # 最大 10分
+          interval=10
+          elapsed=0
+          healthy=false
+
+          while [ $elapsed -lt $timeout ]; do
+            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
+              echo "✅ Airflow webserver is healthy"
+              healthy=true
+              break
+            else
+              echo "⏳ Webserver not ready yet..."
             fi
-            echo "⏳ Webserver not ready yet..."
-            sleep 10
+            sleep $interval
+            elapsed=$((elapsed + interval))
           done
-          echo "❌ Airflow webserver did not become healthy in time"
-          docker compose logs airflow-webserver
-          exit 1
+
+          # バックグラウンドのログフォローを停止
+          kill $LOGS_PID || true
+
+          if [ "$healthy" = false ]; then
+            echo "❌ Airflow webserver did not become healthy in time"
+            exit 1
+          fi
 
       - name: Test GCS connection
         run: |
-          docker compose exec -T airflow-webserver gsutil ls gs://my-gcs-bucket-2025-demo || exit 1
+          echo "Testing GCS connection..."
+          gsutil ls gs://my-gcs-bucket-2025-demo || exit 1
 
       - name: Test S3 connection
         run: |
-          docker compose exec -T airflow-webserver aws s3 ls s3://domoproject || exit 1
+          echo "Testing S3 connection..."
+          aws s3 ls s3://domoproject || exit 1
 
       - name: Test BigQuery connection
         run: |
-          docker compose exec -T airflow-webserver bq ls striking-yen-470200-u3: || exit 1
+          echo "Testing BigQuery connection..."
+          bq ls striking-yen-470200-u3: || exit 1
 
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
+        run: |
+          echo "Triggering DAG..."
+          docker-compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
 
       - name: Wait for DAG to finish (max 10 min)
         run: |
-          for i in {1..60}; do
-            STATE=$(docker compose exec -T airflow-webserver airflow dags state industry_metrics_from_input $(date +%Y-%m-%d))
-            echo "DAG state: $STATE"
-            if [[ "$STATE" == "success" ]]; then
+          echo "Waiting for DAG to finish..."
+          timeout=600
+          interval=30
+          elapsed=0
+          finished=false
+
+          while [ $elapsed -lt $timeout ]; do
+            state=$(docker-compose exec -T airflow-webserver airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1 | awk '{print $2}')
+            echo "Current DAG state: $state"
+            if [ "$state" = "success" ]; then
               echo "✅ DAG completed successfully"
-              exit 0
+              finished=true
+              break
             fi
-            sleep 10
+            sleep $interval
+            elapsed=$((elapsed + interval))
           done
-          echo "❌ DAG did not complete in 10 minutes"
-          docker compose logs airflow-webserver
-          exit 1
+
+          if [ "$finished" = false ]; then
+            echo "❌ DAG did not complete in time"
+            exit 1
+          fi
 
       - name: Run pytest (check output files)
-        run: docker compose exec -T airflow-webserver pytest /opt/airflow/tests || exit 1
+        run: |
+          echo "Running pytest..."
+          docker-compose exec -T airflow-webserver pytest /opt/airflow/tests
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: |
+          echo "Cleaning up..."
+          docker-compose down -v
