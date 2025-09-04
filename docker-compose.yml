@@ -25,7 +25,7 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY= # 必要なら secrets で設定
+      - AIRFLOW__CORE__FERNET_KEY=12345678901234567890123456789012
       - AIRFLOW__WEBSERVER__PORT=8080
     ports:
       - "8080:8080"
@@ -33,7 +33,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./variables.json:/opt/airflow/variables.json   # 👈 Airflow Variables のJSONをマウント
+      - ./variables.json:/opt/airflow/variables.json
     command: webserver
 
   airflow-scheduler:
@@ -45,12 +45,12 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY= # 必要なら secrets で設定
+      - AIRFLOW__CORE__FERNET_KEY=12345678901234567890123456789012
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./variables.json:/opt/airflow/variables.json   # 👈 同じくマウント
+      - ./variables.json:/opt/airflow/variables.json
     command: scheduler
 
 volumes:
