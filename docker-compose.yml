@@ -17,6 +17,22 @@ services:
     ports:
       - "6379:6379"
 
+  airflow-init:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+    entrypoint: airflow db init
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
+
   airflow-webserver:
     image: apache/airflow:2.6.3
     depends_on:
