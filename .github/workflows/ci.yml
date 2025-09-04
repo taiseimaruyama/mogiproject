@@ -14,10 +14,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # メモリ不足対策（Airflow + Docker Compose は重いので swap を追加）
       - name: Add swap to prevent OOM
         run: |
-          sudo fallocate -l 4G /swapfile
+          sudo fallocate -l 2G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -27,29 +26,40 @@ jobs:
         run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker compose exec -T airflow-webserver airflow db migrate
+        run: |
+          set -e
+          # Airflow バージョンに応じて migrate または init を実行
+          if docker compose exec -T airflow-webserver airflow db --help | grep -q migrate; then
+            echo "Using airflow db migrate"
+            docker compose exec -T airflow-webserver airflow db migrate
+          else
+            echo "Using airflow db init"
+            docker compose exec -T airflow-webserver airflow db init
+          fi
 
       - name: Import Airflow Variables
-        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: |
+          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
-      - name: Wait for Airflow webserver to be ready
+      - name: Wait for Airflow webserver
         run: |
           for i in {1..30}; do
             if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "Airflow Webserver is ready!"
+              echo "Airflow Webserver is up!"
               exit 0
             fi
             echo "Waiting for Airflow Webserver..."
             sleep 10
           done
-          echo "Airflow Webserver did not become ready in time" >&2
           exit 1
 
       - name: Trigger DAG run
         run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
-        run: pytest tests/
+        run: |
+          pip install pytest
+          pytest tests/
 
       - name: Tear down
         if: always()
