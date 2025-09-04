@@ -1,8 +1,8 @@
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
-from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
+from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
 from datetime import datetime
 
 with DAG(
@@ -12,42 +12,43 @@ with DAG(
     catchup=False,
 ) as dag:
 
-    # Step1: ダミーファイル生成
-    generate_file = BashOperator(
-        task_id="generate_file",
-        bash_command="echo 'id,name\n1,Alice\n2,Bob' > /tmp/sample.csv",
+    # ローカルファイルを出力するタスク
+    make_file = BashOperator(
+        task_id="make_file",
+        bash_command="echo 'Hello Data' > /tmp/hello.txt"
     )
 
-    # Step2: S3 にアップロード
-    upload_to_s3 = LocalFilesystemToS3Operator(
-        task_id="upload_to_s3",
-        filename="/tmp/sample.csv",
-        dest_key="data/sample.csv",
-        dest_bucket="your-s3-bucket-name",  # 🔧 修正ポイント
-        aws_conn_id="aws_default",
-        replace=True,
-    )
-
-    # Step3: GCS にアップロード
+    # GCS へアップロード
     upload_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_to_gcs",
-        src="/tmp/sample.csv",
-        dst="data/sample.csv",
-        bucket="your-gcs-bucket-name",      # 🔧 修正ポイント
-        gcp_conn_id="google_cloud_default",
-        mime_type="text/csv",
+        src="/tmp/hello.txt",
+        dst="hello.txt",
+        bucket="my-gcs-bucket-2025-demo"
     )
 
-    # Step4: BigQuery にロード
-    load_to_bigquery = GCSToBigQueryOperator(
-        task_id="load_to_bigquery",
-        bucket="your-gcs-bucket-name",      # 🔧 修正ポイント
-        source_objects=["data/sample.csv"],
-        destination_project_dataset_table="your_project_id.your_dataset.sales_table",  # 🔧 修正ポイント
-        source_format="CSV",
-        skip_leading_rows=1,
-        write_disposition="WRITE_TRUNCATE",
+    # S3 へアップロード
+    upload_to_s3 = LocalFilesystemToS3Operator(
+        task_id="upload_to_s3",
+        filename="/tmp/hello.txt",
+        dest_key="hello.txt",
+        dest_bucket="domoproject"
     )
 
-    # DAG の依存関係
-    generate_file >> upload_to_s3 >> upload_to_gcs >> load_to_bigquery
+    # BigQuery にロード
+    load_to_bq = BigQueryInsertJobOperator(
+        task_id="load_to_bq",
+        configuration={
+            "query": {
+                "query": "SELECT 'Hello from BigQuery' AS message",
+                "useLegacySql": False,
+                "destinationTable": {
+                    "projectId": "{{ var.value.gcp_project_id }}",
+                    "datasetId": "{{ var.value.bigquery_dataset }}",
+                    "tableId": "test_table"
+                },
+                "writeDisposition": "WRITE_TRUNCATE",
+            }
+        }
+    )
+
+    make_file >> [upload_to_gcs, upload_to_s3] >> load_to_bq
