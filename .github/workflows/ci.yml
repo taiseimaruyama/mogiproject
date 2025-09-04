@@ -1,4 +1,4 @@
-name: e2e-test
+name: Airflow CI
 
 on:
   push:
@@ -14,26 +14,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker
         uses: docker/setup-buildx-action@v2
 
-      - name: Start services with Docker Compose
+      - name: Start Airflow
         run: |
+          export AIRFLOW__CORE__FERNET_KEY=$(openssl rand -base64 32)
           docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: |
-          docker compose exec -T airflow-webserver airflow db migrate
+        run: docker compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
-        run: |
-          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
       - name: Wait for Airflow webserver
         run: |
           for i in {1..30}; do
             if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "Airflow is ready!"
+              echo "Airflow is up!"
               exit 0
             fi
             echo "Waiting for Airflow..."
@@ -41,13 +40,11 @@ jobs:
           done
           exit 1
 
-      - name: Trigger DAG
-        run: |
-          docker compose exec -T airflow-webserver airflow dags trigger test_dag
+      - name: Trigger DAG run
+        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
-        run: |
-          pytest tests/
+        run: pytest tests/
 
       - name: Tear down
         if: always()
