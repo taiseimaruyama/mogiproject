@@ -30,7 +30,7 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # 修正箇所: docker-compose → docker compose
+      # 修正版: docker compose に統一
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
@@ -78,7 +78,7 @@ jobs:
       - name: Run pytest
         run: pytest -v
 
-      # 修正箇所: docker-compose → docker compose
+      # 修正版: docker compose に統一
       - name: Tear down
         if: always()
         run: docker compose down -v
