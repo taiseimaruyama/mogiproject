@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Prepare host dirs
+        run: |
+          mkdir -p dags logs plugins output
+          chmod -R 777 dags logs plugins output
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -65,6 +70,7 @@ jobs:
       - name: Run pytest (check output files)
         run: pytest tests/
 
+      # ===== S3 確認 =====
       - name: Install AWS CLI
         run: |
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -72,18 +78,19 @@ jobs:
           sudo ./aws/install
 
       - name: Verify file uploaded to AWS S3
-        run: aws s3 ls s3://domoproject/
+        run: aws s3 ls s3://domoproject/ads/
 
+      # ===== GCP 確認 =====
       - name: Install gcloud CLI
         run: |
-          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
           echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
+          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
           export PATH=$PATH:$HOME/google-cloud-sdk/bin
           gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
           gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Verify file uploaded to GCS
-        run: gsutil ls gs://my-gcs-bucket-2025-demo/
+        run: gsutil ls gs://my-gcs-bucket-2025-demo/retail/
 
       - name: Verify data loaded into BigQuery
-        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.sales_table\`"
+        run: bq query --use_legacy_sql=false "SELECT COUNT(*) as row_count FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.retail_metrics\`"
