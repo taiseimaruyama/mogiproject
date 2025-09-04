@@ -17,6 +17,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # GCP 認証 (Secrets 使用)
       - name: Set up GCP credentials
         uses: google-github-actions/auth@v2
         with:
@@ -30,7 +31,7 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # 修正版: docker compose に統一
+      # docker compose に統一済み
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
@@ -78,7 +79,6 @@ jobs:
       - name: Run pytest
         run: pytest -v
 
-      # 修正版: docker compose に統一
       - name: Tear down
         if: always()
         run: docker compose down -v
