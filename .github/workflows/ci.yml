@@ -23,14 +23,17 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      - name: Set up Docker Compose
-        run: docker-compose -f docker-compose.yml up -d
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Start services with Docker Compose
+        run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-webserver airflow db migrate
+        run: docker compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
-        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
       - name: Wait for Airflow webserver
         run: |
@@ -45,11 +48,11 @@ jobs:
           exit 1
 
       - name: Trigger DAG run
-        run: docker-compose exec -T airflow-webserver airflow dags trigger -d test_dag
+        run: docker compose exec -T airflow-webserver airflow dags trigger -d test_dag
 
       - name: Run pytest (check output files)
         run: pytest tests/
 
       - name: Tear down
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
