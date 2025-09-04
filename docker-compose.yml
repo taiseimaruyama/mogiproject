@@ -1,74 +1,57 @@
-version: '3.8'
+version: "3"
 
 services:
   postgres:
     image: postgres:13
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          memory: 512m
 
   redis:
-    image: redis:6
-    deploy:
-      resources:
-        limits:
-          memory: 256m
+    image: redis:latest
+    ports:
+      - "6379:6379"
 
   airflow-webserver:
-    image: apache/airflow:2.7.1
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    image: apache/airflow:2.6.3
     depends_on:
       - postgres
       - redis
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./variables.json:/opt/airflow/variables.json
-    ports:
-      - "8080:8080"
-    command: webserver
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-
-  airflow-scheduler:
-    image: apache/airflow:2.7.1
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key
+      - AIRFLOW__CORE__FERNET_KEY= # 必要なら secrets で設定
+      - AIRFLOW__WEBSERVER__PORT=8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json   # 👈 Airflow Variables のJSONをマウント
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.6.3
     depends_on:
       - airflow-webserver
       - postgres
       - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY= # 必要なら secrets で設定
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./variables.json:/opt/airflow/variables.json
+      - ./variables.json:/opt/airflow/variables.json   # 👈 同じくマウント
     command: scheduler
-    deploy:
-      resources:
-        limits:
-          memory: 1g
 
 volumes:
   postgres-db-volume:
