@@ -2,9 +2,9 @@ name: e2e-test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -14,6 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # メモリ不足対策（Airflow + Docker Compose は重いので swap を追加）
       - name: Add swap to prevent OOM
         run: |
           sudo fallocate -l 4G /swapfile
@@ -23,32 +24,33 @@ jobs:
           free -h
 
       - name: Set up Docker Compose
-        run: docker-compose -f docker-compose.yml up -d
+        run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-webserver airflow db migrate
+        run: docker compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
-        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
-      - name: Wait for Airflow webserver
+      - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep -q healthy; then
-              echo "Airflow webserver is ready!"
+            if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
+              echo "Airflow Webserver is ready!"
               exit 0
             fi
-            echo "Waiting for webserver..."
+            echo "Waiting for Airflow Webserver..."
             sleep 10
           done
+          echo "Airflow Webserver did not become ready in time" >&2
           exit 1
 
       - name: Trigger DAG run
-        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
+        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
         run: pytest tests/
 
       - name: Tear down
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
