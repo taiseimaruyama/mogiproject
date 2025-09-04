@@ -75,7 +75,7 @@ default_args = {
 }
 
 with DAG(
-    dag_id="industry_metrics_from_input",
+    dag_id="industry_metrics_full_dag",   # ✅ DAG ID をファイル名と一致
     default_args=default_args,
     description="PoC: Retail & Ads KPI from existing CSV",
     schedule_interval="@daily",
@@ -99,7 +99,7 @@ with DAG(
         task_id="load_retail_metrics_to_bq",
         bucket="my-gcs-bucket-2025-demo",   # ✅ 修正版バケット名
         source_objects=["metrics/retail_metrics.csv"],
-        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",  # ✅ プロジェクトIDとデータセット
+        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",
         schema_fields=[
             {"name": "total_days", "type": "INTEGER", "mode": "NULLABLE"},
             {"name": "stockout_days", "type": "INTEGER", "mode": "NULLABLE"},
