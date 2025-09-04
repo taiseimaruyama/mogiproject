@@ -35,11 +35,9 @@ jobs:
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
-          # follow logs in background (webserver + scheduler)
-          docker-compose logs -f airflow-webserver &
-          LOGS_WS_PID=$!
-          docker-compose logs -f airflow-scheduler &
-          LOGS_SCHED_PID=$!
+          # follow logs in background
+          docker-compose logs -f airflow-webserver & 
+          LOGS_PID=$!
 
           timeout=600   # 最大 10分
           interval=10
@@ -47,7 +45,7 @@ jobs:
           healthy=false
 
           while [ $elapsed -lt $timeout ]; do
-            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
+            if docker-compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
               echo "✅ Airflow webserver is healthy"
               healthy=true
               break
@@ -58,15 +56,10 @@ jobs:
             elapsed=$((elapsed + interval))
           done
 
-          # バックグラウンドのログフォローを停止
-          kill $LOGS_WS_PID || true
-          kill $LOGS_SCHED_PID || true
+          kill $LOGS_PID || true
 
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
-            # 失敗時に全ログを出力
-            docker-compose logs airflow-webserver
-            docker-compose logs airflow-scheduler
             exit 1
           fi
 
@@ -112,8 +105,6 @@ jobs:
 
           if [ "$finished" = false ]; then
             echo "❌ DAG did not complete in time"
-            docker-compose logs airflow-webserver
-            docker-compose logs airflow-scheduler
             exit 1
           fi
 
