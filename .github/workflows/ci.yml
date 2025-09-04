@@ -1,34 +1,14 @@
-name: CI
+name: CI Airflow
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: airflow
-          POSTGRES_PASSWORD: airflow
-          POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U airflow"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
-      redis:
-        image: redis:latest
-        ports:
-          - 6379:6379
 
     steps:
       - name: Checkout repository
@@ -36,17 +16,22 @@ jobs:
 
       - name: Add swap to prevent OOM
         run: |
-          sudo fallocate -l 16G /swapfile
+          sudo fallocate -l 10G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
+      - name: Generate Fernet Key
+        id: fernet
+        run: |
+          echo "FERNET_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> $GITHUB_ENV
+
       - name: Set up Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-init
+        run: docker compose exec -T airflow-init airflow db init
 
       - name: Import Airflow Variables
         run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
@@ -54,8 +39,8 @@ jobs:
       - name: Wait for Airflow webserver to be ready
         run: |
           for i in {1..30}; do
-            if docker compose exec -T airflow-webserver curl -f http://localhost:8080/health; then
-              echo "Airflow Webserver is ready"
+            if docker compose logs airflow-webserver | grep -q "Listening at:"; then
+              echo "Airflow Webserver is ready!"
               exit 0
             fi
             echo "Waiting for Airflow Webserver..."
@@ -64,7 +49,7 @@ jobs:
           exit 1
 
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
+        run: docker compose exec -T airflow-webserver airflow dags trigger -d test_dag
 
       - name: Run pytest (check output files)
         run: docker compose exec -T airflow-webserver pytest tests/
