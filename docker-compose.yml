@@ -1,4 +1,5 @@
-version: '3'
+version: '3.8'
+
 services:
   postgres:
     image: postgres:13
@@ -6,50 +7,25 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-    ports:
-      - "5432:5432"
-
-  redis:
-    image: redis:latest
-    ports:
-      - "6379:6379"
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
 
   airflow-webserver:
     image: apache/airflow:2.7.2
-    command: webserver
     restart: always
-    depends_on:
-      - postgres
-      - redis
+    command: webserver
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
     ports:
       - "8080:8080"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-
-  airflow-scheduler:
-    image: apache/airflow:2.7.2
-    command: scheduler
-    restart: always
     depends_on:
       - postgres
-      - redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+
+volumes:
+  postgres-db-volume:
