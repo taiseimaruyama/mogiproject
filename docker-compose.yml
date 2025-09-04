@@ -25,7 +25,7 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=qF6mYUl6qM08X1Z2p0F4iVhJb3oC7cV1zM0Xzq9wAtc=   # ← 生成したFernet Keyを設定
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}     # 👈 GitHub Actions で生成されるキーを利用
       - AIRFLOW__WEBSERVER__PORT=8080
     ports:
       - "8080:8080"
@@ -45,7 +45,7 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=qF6mYUl6qM08X1Z2p0F4iVhJb3oC7cV1zM0Xzq9wAtc=   # ← 同じキーを必ず設定
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}     # 👈 同じキーを利用
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
