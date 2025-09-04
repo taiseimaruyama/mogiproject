@@ -42,12 +42,10 @@ jobs:
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
-      # 改良版: Webserver のヘルスチェック & ログ追従
+      # 改良版: Webserver のヘルスチェック & ログ出力
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
-          docker compose logs -f airflow-webserver &
-          LOGS_PID=$!
           timeout=600
           interval=10
           elapsed=0
@@ -58,12 +56,12 @@ jobs:
               healthy=true
               break
             else
-              echo "⏳ Webserver not ready yet..."
+              echo "⏳ Webserver not ready yet... (elapsed: ${elapsed}s)"
+              docker compose logs --tail=20 airflow-webserver
             fi
             sleep $interval
             elapsed=$((elapsed + interval))
           done
-          kill $LOGS_PID || true
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
             docker compose logs airflow-webserver
