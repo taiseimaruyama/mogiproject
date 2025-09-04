@@ -14,24 +14,9 @@ services:
 
   redis:
     image: redis:latest
-    ports:
-      - "6379:6379"
-
-  airflow-init:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - postgres
-      - redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
-    entrypoint: airflow db init
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./variables.json:/opt/airflow/variables.json
+    # GitHub Actions 環境での競合を避けるため ports 公開を削除
+    # ports:
+    #   - "6379:6379"
 
   airflow-webserver:
     image: apache/airflow:2.6.3
@@ -41,7 +26,7 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
       - AIRFLOW__WEBSERVER__PORT=8080
     ports:
       - "8080:8080"
@@ -61,13 +46,29 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./variables.json:/opt/airflow/variables.json
     command: scheduler
+
+  airflow-init:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./variables.json:/opt/airflow/variables.json
+    entrypoint: [ "airflow", "db", "init" ]
 
 volumes:
   postgres-db-volume:
