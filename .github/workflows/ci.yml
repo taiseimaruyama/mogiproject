@@ -14,17 +14,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Start services with Docker Compose
         run: |
-          docker-compose -f docker-compose.yml up -d
+          docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
         run: |
-          docker-compose exec -T airflow-webserver airflow db migrate
+          docker compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
         run: |
-          docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
       - name: Wait for Airflow webserver
         run: |
@@ -40,7 +43,7 @@ jobs:
 
       - name: Trigger DAG
         run: |
-          docker-compose exec -T airflow-webserver airflow dags trigger test_dag
+          docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
         run: |
@@ -48,4 +51,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
