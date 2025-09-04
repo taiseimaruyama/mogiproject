@@ -35,7 +35,8 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-      - ./output:/opt/airflow/output   # ← 追加
+      - ./output:/opt/airflow/output         # 修正①: 出力マウント
+      - ./variables.json:/opt/airflow/variables.json   # 修正②: Variablesマウント
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
@@ -53,7 +54,8 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-      - ./output:/opt/airflow/output   # ← 追加
+      - ./output:/opt/airflow/output         # 修正①
+      - ./variables.json:/opt/airflow/variables.json   # 修正②
 
 volumes:
   postgres_data:
