@@ -23,14 +23,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose python3-pip unzip
+          sudo apt-get install -y docker-compose python3-pip
           pip install apache-airflow[gcp,aws]==2.7.2 pytest
 
       - name: Start Airflow with Docker Compose
         run: docker-compose up -d
 
-      - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-scheduler airflow db init   # 修正: webserver → scheduler
+      # ここで "airflow db init" は不要になったので削除済み
 
       - name: Wait for Airflow webserver to be ready
         run: |
@@ -54,7 +53,7 @@ jobs:
       - name: Install AWS CLI
         run: |
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -q awscliv2.zip
+          unzip awscliv2.zip
           sudo ./aws/install
 
       - name: Verify file uploaded to AWS S3
