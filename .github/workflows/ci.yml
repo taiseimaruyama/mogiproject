@@ -26,7 +26,7 @@ jobs:
         run: docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker compose exec -T airflow-webserver airflow db migrate
+        run: docker compose exec -T airflow-webserver airflow db init
 
       - name: Import Airflow Variables
         run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
