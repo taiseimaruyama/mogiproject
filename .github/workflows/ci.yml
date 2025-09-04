@@ -20,11 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Prepare host dirs   # ← 追加
-        run: |
-          mkdir -p dags logs plugins output
-          chmod -R 777 dags logs plugins output
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -42,15 +37,26 @@ jobs:
 
       - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..15}; do
+          for i in {1..20}; do
             if docker-compose logs airflow-webserver | grep -q "Listening at: http"; then
               echo "Airflow Webserver is up!"
               exit 0
             fi
-            echo "Waiting for webserver... ($i/15)"
+            echo "Waiting for webserver... ($i/20)"
             sleep 10
           done
-          echo "Webserver did not start in time"
+          exit 1
+
+      - name: Wait for DAGs to be parsed
+        run: |
+          for i in {1..15}; do
+            if docker-compose exec -T airflow-webserver airflow dags list | grep -q "test_dag"; then
+              echo "DAG test_dag is loaded!"
+              exit 0
+            fi
+            echo "Waiting for DAG parsing... ($i/15)"
+            sleep 10
+          done
           exit 1
 
       - name: Trigger DAG run
@@ -70,11 +76,14 @@ jobs:
 
       - name: Install gcloud CLI
         run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
           curl -sSL https://sdk.cloud.google.com | bash > /dev/null
+          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
           export PATH=$PATH:$HOME/google-cloud-sdk/bin
           gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
           gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Verify file uploaded to GCS
         run: gsutil ls gs://my-gcs-bucket-2025-demo/
+
+      - name: Verify data loaded into BigQuery
+        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.sales_table\`"
