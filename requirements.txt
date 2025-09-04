@@ -1,8 +1,6 @@
-pandas
-numpy
-matplotlib
-statsmodels
-apache-airflow
-apache-airflow-providers-google
-apache-airflow-providers-amazon
+apache-airflow==2.7.2
 pytest
+
+# 追加するプロバイダー
+apache-airflow-providers-amazon
+apache-airflow-providers-google
