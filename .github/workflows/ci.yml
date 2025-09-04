@@ -49,7 +49,7 @@ jobs:
           exit 1
 
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger -d test_dag
+        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
         run: docker compose exec -T airflow-webserver pytest tests/
