@@ -19,13 +19,11 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.7.2
+    command: webserver
     restart: always
     depends_on:
       - postgres
       - redis
-    user: "0:0"  # ← PermissionError 対策で root 実行
-    command: >
-      bash -c "airflow db init && airflow webserver"
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -40,13 +38,11 @@ services:
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
+    command: scheduler
     restart: always
     depends_on:
       - postgres
       - redis
-    user: "0:0"  # ← PermissionError 対策で root 実行
-    command: >
-      bash -c "airflow scheduler"
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
