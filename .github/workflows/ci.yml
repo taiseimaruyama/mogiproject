@@ -26,6 +26,11 @@ jobs:
           sudo apt-get install -y docker-compose python3-pip
           pip install apache-airflow[gcp,aws]==2.7.2 pytest
 
+      - name: Prepare Airflow directories  # ← 新規追加
+        run: |
+          mkdir -p dags logs plugins
+          chmod -R 777 dags logs plugins
+
       - name: Start Airflow with Docker Compose
         run: docker-compose up -d
 
