@@ -35,17 +35,17 @@ jobs:
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
-          # webserver のログを並行で追跡（失敗時に原因が見えるように）
+          # follow logs in background (リアルタイム表示用)
           docker-compose logs -f airflow-webserver &
           LOGS_PID=$!
 
-          timeout=600   # 最大10分待つ
+          timeout=600   # 最大 10分
           interval=10
           elapsed=0
           healthy=false
 
           while [ $elapsed -lt $timeout ]; do
-            if docker-compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q 'healthy'; then
+            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
               echo "✅ Airflow webserver is healthy"
               healthy=true
               break
@@ -56,12 +56,26 @@ jobs:
             elapsed=$((elapsed + interval))
           done
 
+          # バックグラウンドのログフォローを停止
           kill $LOGS_PID || true
 
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
             exit 1
           fi
+
+      # ======================
+      # GCP 認証追加
+      # ======================
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: striking-yen-470200-u3
 
       - name: Test GCS connection
         run: |
