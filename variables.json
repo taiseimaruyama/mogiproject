@@ -1,5 +1,5 @@
 {
   "gcs_bucket": "my-gcs-bucket-2025-demo",
-  "bq_dataset": "your_dataset_name",
+  "bq_dataset": "sales_dataset",
   "s3_bucket": "domoproject"
 }
