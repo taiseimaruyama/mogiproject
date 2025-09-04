@@ -29,7 +29,8 @@ jobs:
       - name: Start Airflow with Docker Compose
         run: docker-compose up -d
 
-      # ここで "airflow db init" は不要になったので削除済み
+      - name: Initialize Airflow DB
+        run: docker-compose exec -T airflow-webserver airflow db init
 
       - name: Wait for Airflow webserver to be ready
         run: |
@@ -45,7 +46,9 @@ jobs:
           exit 1
 
       - name: Trigger DAG run
-        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
+        run: |
+          docker-compose run --rm airflow-webserver airflow dags list
+          docker-compose run --rm airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
         run: pytest tests/
