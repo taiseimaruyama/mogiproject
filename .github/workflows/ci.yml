@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
 
 jobs:
@@ -11,45 +10,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. リポジトリ取得
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # 2. メモリ不足対策 (swap 10GB)
       - name: Add swap to prevent OOM
         run: |
+          sudo swapoff -a
           sudo fallocate -l 10G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
+      # 3. Docker Compose セットアップ
       - name: Set up Docker Compose
         run: |
           docker compose -f docker-compose.yml up -d
+          docker ps -a
 
+      # 4. Airflow DB 初期化
       - name: Initialize Airflow DB
         run: |
           docker compose exec -T airflow-webserver airflow db init
 
+      # 5. Airflow Variables のインポート
       - name: Import Airflow Variables
         run: |
-          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/dags/variables.json || echo "No variables.json"
+          if [ -f airflow_vars.json ]; then
+            docker compose cp airflow_vars.json airflow-webserver:/opt/airflow/airflow_vars.json
+            docker compose exec -T airflow-webserver airflow variables import /opt/airflow/airflow_vars.json
+          else
+            echo "No airflow_vars.json found, skipping import."
+          fi
 
+      # 6. Airflow Webserver 起動待ち
       - name: Wait for Airflow webserver to be ready
         run: |
-          echo "Sleeping 300s for Airflow webserver to stabilize..."
-          sleep 300
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health | grep '"metadatabase":.*"healthy"' > /dev/null; then
+              echo "✅ Airflow webserver is ready"
+              exit 0
+            fi
+            echo "Waiting for Airflow webserver..."
+            sleep 10
+          done
+          echo "❌ Airflow webserver did not become ready in time"
+          exit 1
 
+      # 7. DAG 実行トリガー
       - name: Trigger DAG run
         run: |
-          RUN_ID=ci_run_$(date +%s)
-          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
-          docker compose exec -T airflow-webserver airflow dags trigger -r $RUN_ID industry_metrics_full_dag
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger industry_metrics_from_input
 
+      # 8. DAG 完了待ち (30分)
       - name: Wait for DAG to finish (max 30 min)
         run: |
-          echo "Checking DAG state for RUN_ID=$RUN_ID"
-          for i in {1..90}; do  # 90回 × 10秒 = 15分
-            state=$(docker compose exec -T airflow-webserver airflow dags state industry_metrics_full_dag $RUN_ID || echo "not_found")
+          echo "Checking DAG runs for industry_metrics_from_input"
+          for i in {1..180}; do  # 最大30分 (180 * 10秒)
+            state=$(docker compose exec -T airflow-webserver \
+              airflow dags list-runs -d industry_metrics_from_input --no-backfill --output json | jq -r '.[0].state' || echo "not_found")
             echo "Current state: $state"
             if [[ "$state" == "success" ]]; then
               echo "✅ DAG finished successfully"
@@ -63,10 +85,12 @@ jobs:
           echo "⏰ Timed out waiting for DAG to finish (30 min limit)"
           exit 1
 
+      # 9. pytest 実行
       - name: Run pytest (check output files)
         run: |
-          docker compose exec -T airflow-webserver pytest tests/ || echo "pytest skipped"
+          docker compose exec -T airflow-webserver pytest tests/ || true
 
+      # 10. 後始末
       - name: Tear down
         if: always()
         run: |
