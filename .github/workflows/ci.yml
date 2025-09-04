@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -25,69 +25,69 @@ jobs:
       - name: Set up Docker Compose
         run: |
           docker-compose -f docker-compose.yml up -d
+          docker ps -a
 
-      - name: Initialize Airflow DB
-        run: |
-          docker compose exec -T airflow-webserver airflow db init
-
-      # ✅ WebserverのHealthチェックを30回(最大5分)まで繰り返す
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver to be healthy..."
-          for i in {1..30}; do
+          # ログをバックグラウンドで流す
+          docker-compose logs -f airflow-webserver &
+          LOG_PID=$!
+
+          for i in {1..60}; do
             if curl -sf http://localhost:8080/health | grep -q "\"status\": \"healthy\""; then
               echo "✅ Webserver is healthy!"
+              kill $LOG_PID || true
               exit 0
             fi
-            echo "⏳ Webserver not ready yet... ($i/30)"
+            echo "⏳ Webserver not ready yet... ($i/60)"
             sleep 10
           done
-          echo "❌ Webserver did not become healthy in time. Dumping logs..."
-          docker-compose ps
-          docker-compose logs --tail=100 airflow-webserver
+
+          echo "❌ Webserver did not become healthy in time."
+          kill $LOG_PID || true
           exit 1
 
-      # ✅ GCS接続テスト
       - name: Test GCS connection
         run: |
-          docker compose exec -T airflow-webserver gsutil ls gs://my-gcs-bucket-2025-demo || exit 1
+          echo "Testing GCS connection..."
+          gsutil ls gs://my-gcs-bucket-2025-demo
 
-      # ✅ S3接続テスト
       - name: Test S3 connection
         run: |
-          docker compose exec -T airflow-webserver aws s3 ls s3://domoproject || exit 1
+          echo "Testing S3 connection..."
+          aws s3 ls s3://domoproject
 
-      # ✅ BigQuery接続テスト
       - name: Test BigQuery connection
         run: |
-          docker compose exec -T airflow-webserver bq ls striking-yen-470200-u3: | head || exit 1
+          echo "Testing BigQuery connection..."
+          bq ls striking-yen-470200-u3:sales_dataset
 
-      # ✅ DAG実行トリガー
       - name: Trigger DAG run
         run: |
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
+          docker-compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
 
-      # ✅ DAG完了を最大10分待機
       - name: Wait for DAG to finish (max 10 min)
         run: |
-          echo "⏳ Waiting for DAG to finish..."
+          echo "⏳ Waiting for DAG industry_metrics_from_input to finish..."
           for i in {1..20}; do
-            state=$(docker compose exec -T airflow-webserver airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1)
-            echo "DAG state: $state"
-            if [ "$state" = "success" ]; then
-              echo "✅ DAG finished successfully!"
+            STATE=$(docker-compose exec -T airflow-webserver \
+              airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1)
+            echo "DAG state: $STATE"
+            if [[ "$STATE" == "success" ]]; then
+              echo "✅ DAG finished successfully"
               exit 0
-            elif [ "$state" = "failed" ]; then
-              echo "❌ DAG failed!"
-              docker-compose logs --tail=200 airflow-webserver
-              exit 1
             fi
             sleep 30
           done
-          echo "❌ DAG did not finish within 10 minutes."
-          docker-compose logs --tail=200 airflow-webserver
+          echo "❌ DAG did not complete in time"
           exit 1
+
+      - name: Run pytest (check output files)
+        run: |
+          docker-compose exec -T airflow-webserver pytest tests/
 
       - name: Tear down
         if: always()
-        run: docker-compose down -v
+        run: |
+          docker-compose down -v
