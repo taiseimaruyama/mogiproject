@@ -14,8 +14,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Add swap to prevent OOM
+      - name: Add swap (2GB) to prevent OOM
         run: |
+          sudo swapoff -a || true
           sudo fallocate -l 2G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
@@ -28,7 +29,6 @@ jobs:
       - name: Initialize Airflow DB
         run: |
           set -e
-          # Airflow バージョンに応じて migrate または init を実行
           if docker compose exec -T airflow-webserver airflow db --help | grep -q migrate; then
             echo "Using airflow db migrate"
             docker compose exec -T airflow-webserver airflow db migrate
