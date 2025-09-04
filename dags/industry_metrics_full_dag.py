@@ -8,7 +8,8 @@ from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesyste
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
 
-INPUT_DIR = "/opt/airflow/input"   # ← 配置されたCSVを置く場所
+# 入出力ディレクトリ
+INPUT_DIR = "/opt/airflow/input"
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -82,7 +83,7 @@ with DAG(
     tags=["poc", "retail", "ads", "bigquery", "s3"],
 ) as dag:
 
-    # Retail
+    # Retail pipeline
     retail_preprocess = PythonOperator(task_id="preprocess_retail", python_callable=preprocess_retail)
     retail_validate = PythonOperator(task_id="validate_retail", python_callable=validate_retail)
     retail_metrics = PythonOperator(task_id="calc_retail_metrics", python_callable=calc_retail_metrics)
@@ -91,14 +92,14 @@ with DAG(
         task_id="upload_retail_metrics_to_gcs",
         src=f"{OUTPUT_DIR}/retail_metrics.csv",
         dst="metrics/retail_metrics.csv",
-        bucket="my-gcs-bucket",
+        bucket="my-gcs-bucket-2025-demo",   # ✅ 修正版バケット名
     )
 
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
-        bucket="my-gcs-bucket",
+        bucket="my-gcs-bucket-2025-demo",   # ✅ 修正版バケット名
         source_objects=["metrics/retail_metrics.csv"],
-        destination_project_dataset_table="my_project.my_dataset.retail_metrics",
+        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",  # ✅ プロジェクトIDとデータセット
         schema_fields=[
             {"name": "total_days", "type": "INTEGER", "mode": "NULLABLE"},
             {"name": "stockout_days", "type": "INTEGER", "mode": "NULLABLE"},
@@ -108,7 +109,7 @@ with DAG(
         write_disposition="WRITE_TRUNCATE",
     )
 
-    # Ads
+    # Ads pipeline
     ads_preprocess = PythonOperator(task_id="preprocess_ads", python_callable=preprocess_ads)
     ads_validate = PythonOperator(task_id="validate_ads", python_callable=validate_ads)
     ads_metrics = PythonOperator(task_id="calc_ads_metrics", python_callable=calc_ads_metrics)
@@ -117,7 +118,7 @@ with DAG(
         task_id="upload_ads_metrics_to_s3",
         filename=f"{OUTPUT_DIR}/ads_metrics.csv",
         dest_key="metrics/ads_metrics.csv",
-        dest_bucket="my-s3-bucket",
+        dest_bucket="domoproject",   # ✅ 修正版バケット名
         replace=True,
     )
 
