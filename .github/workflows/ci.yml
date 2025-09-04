@@ -26,34 +26,53 @@ jobs:
           sudo apt-get install -y docker-compose python3-pip
           pip install apache-airflow[gcp,aws]==2.7.2 pytest
 
-      - name: Prepare Airflow directories
-        run: |
-          mkdir -p dags logs plugins
-          chmod -R 777 dags logs plugins
-
       - name: Start Airflow with Docker Compose
         run: docker-compose up -d
 
       - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-webserver airflow db migrate   # ← 修正ポイント
+        run: docker-compose exec -T airflow-webserver airflow db init
+
+      - name: Import Airflow Variables   # 修正③: Variablesを自動ロード
+        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
       - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..20}; do
+          for i in {1..15}; do
             if docker-compose logs airflow-webserver | grep -q "Listening at: http"; then
               echo "Airflow Webserver is up!"
               exit 0
             fi
-            echo "Waiting for webserver... ($i/20)"
+            echo "Waiting for webserver... ($i/15)"
             sleep 10
           done
           echo "Webserver did not start in time"
           exit 1
 
       - name: Trigger DAG run
-        run: |
-          docker-compose run --rm airflow-webserver airflow dags list
-          docker-compose run --rm airflow-webserver airflow dags trigger test_dag
+        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
         run: pytest tests/
+
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+
+      - name: Verify file uploaded to AWS S3
+        run: aws s3 ls s3://your-s3-bucket-name/
+
+      - name: Install gcloud CLI
+        run: |
+          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
+          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
+          export PATH=$PATH:$HOME/google-cloud-sdk/bin
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Verify file uploaded to GCS
+        run: gsutil ls gs://your-gcs-bucket-name/
+
+      - name: Verify data loaded into BigQuery
+        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.sales_table\`"
