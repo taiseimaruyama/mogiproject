@@ -23,13 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose python3-pip unzip
+          sudo apt-get install -y docker-compose python3-pip
           pip install apache-airflow[gcp,aws]==2.7.2 pytest
-
-      - name: Prepare Airflow directories
-        run: |
-          mkdir -p dags logs plugins
-          chmod -R 777 dags logs plugins
 
       - name: Start Airflow with Docker Compose
         run: docker-compose up -d
@@ -49,6 +44,12 @@ jobs:
           done
           echo "Webserver did not start in time"
           exit 1
+
+      # 👇 追加: DAGロードを待つステップ
+      - name: Wait for DAGs to be loaded
+        run: |
+          echo "Waiting for DAGs to be loaded into Airflow..."
+          sleep 30
 
       - name: Trigger DAG run
         run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
