@@ -33,9 +33,8 @@ services:
       - "8080:8080"
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs   # ← 修正: ホスト側logsをマウント
+      - ./logs:/opt/airflow/logs      # 修正: ログをマウント
       - ./plugins:/opt/airflow/plugins
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"   # ← 修正: 権限を指定
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
@@ -51,9 +50,8 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs   # ← 修正
+      - ./logs:/opt/airflow/logs      # 修正: ログをマウント
       - ./plugins:/opt/airflow/plugins
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"   # ← 修正
 
 volumes:
   postgres_data:
