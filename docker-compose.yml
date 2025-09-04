@@ -13,11 +13,9 @@ services:
   redis:
     image: redis:6
 
-  airflow-webserver:
+  airflow-init:
     image: apache/airflow:2.8.1
-    restart: always
     depends_on:
-      - airflow-scheduler
       - postgres
       - redis
     environment:
@@ -26,10 +24,31 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=some_fernet_key
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__WEBSERVER__DEFAULT_USER=airflow
-      - AIRFLOW__WEBSERVER__DEFAULT_PASSWORD=airflow
+    entrypoint: /bin/bash
+    command: -c "airflow db init && airflow users create \
+        --username airflow \
+        --firstname Admin \
+        --lastname User \
+        --role Admin \
+        --email admin@example.com \
+        --password airflow"
+
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    restart: always
+    depends_on:
+      - airflow-scheduler
+      - postgres
+      - redis
+      - airflow-init   # ✅ 初期化済みであることを保証
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=some_fernet_key
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
     ports:
-      - "8080:8080"   # ✅ ホスト8080 → コンテナ8080を公開
+      - "8080:8080"
     command: webserver
 
   airflow-scheduler:
@@ -38,6 +57,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - airflow-init   # ✅ 初期化済みであることを保証
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
