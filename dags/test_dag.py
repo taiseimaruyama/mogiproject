@@ -8,7 +8,6 @@ from datetime import datetime
 import pandas as pd
 import os
 
-
 # Airflow Variables から取得
 GCS_BUCKET = Variable.get("gcs_bucket")
 BQ_DATASET = Variable.get("bq_dataset")
@@ -20,7 +19,7 @@ INPUT_DIR = "/opt/airflow/input"
 
 def preprocess_retail():
     df = pd.read_csv(os.path.join(INPUT_DIR, "retail.csv"))
-    # 簡単な前処理例: 欠損値を0埋め
+    # 欠損値処理など
     df = df.fillna(0)
     out_path = os.path.join(OUTPUT_DIR, "retail_processed.csv")
     df.to_csv(out_path, index=False)
@@ -28,7 +27,7 @@ def preprocess_retail():
 
 def preprocess_ads():
     df = pd.read_csv(os.path.join(INPUT_DIR, "ads.csv"))
-    # 簡単な前処理例: CTR = clicks / impressions
+    # CTR, ROAS を計算
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
     out_path = os.path.join(OUTPUT_DIR, "ads_processed.csv")
@@ -63,7 +62,8 @@ with DAG(
         task_id="load_retail_to_bq",
         bucket=GCS_BUCKET,
         source_objects=["retail/retail_processed.csv"],
-        destination_project_dataset_table=f"{BQ_DATASET}.retail",
+        destination_project_dataset_table=f"{BQ_DATASET}.retail_metrics",
+        source_format="CSV",
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
     )
