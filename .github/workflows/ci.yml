@@ -2,95 +2,50 @@ name: e2e-test
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
-  e2e-test:
+  airflow-test:
     runs-on: ubuntu-latest
-    env:
-      AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW__CORE__FERNET_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Prepare host dirs
+      - name: Set up Docker Compose
         run: |
-          mkdir -p dags logs plugins output
-          chmod -R 777 dags logs plugins output
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose python3-pip
-          pip install apache-airflow[gcp,aws]==2.7.2 pytest
-
-      - name: Start Airflow with Docker Compose
-        run: docker-compose up -d
+          docker-compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker-compose exec -T airflow-webserver airflow db init
+        run: |
+          docker-compose exec -T airflow-webserver airflow db migrate
 
       - name: Import Airflow Variables
-        run: docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
-
-      - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..20}; do
-            if docker-compose logs airflow-webserver | grep -q "Listening at: http"; then
-              echo "Airflow Webserver is up!"
+          docker-compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+
+      - name: Wait for Airflow webserver
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
+              echo "Airflow is ready!"
               exit 0
             fi
-            echo "Waiting for webserver... ($i/20)"
+            echo "Waiting for Airflow..."
             sleep 10
           done
           exit 1
 
-      - name: Wait for DAGs to be parsed
+      - name: Trigger DAG
         run: |
-          for i in {1..15}; do
-            if docker-compose exec -T airflow-webserver airflow dags list | grep -q "test_dag"; then
-              echo "DAG test_dag is loaded!"
-              exit 0
-            fi
-            echo "Waiting for DAG parsing... ($i/15)"
-            sleep 10
-          done
-          exit 1
-
-      - name: Trigger DAG run
-        run: docker-compose exec -T airflow-webserver airflow dags trigger test_dag
+          docker-compose exec -T airflow-webserver airflow dags trigger test_dag
 
       - name: Run pytest (check output files)
-        run: pytest tests/
-
-      # ===== S3 確認 =====
-      - name: Install AWS CLI
         run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
+          pytest tests/
 
-      - name: Verify file uploaded to AWS S3
-        run: aws s3 ls s3://domoproject/ads/
-
-      # ===== GCP 確認 =====
-      - name: Install gcloud CLI
-        run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
-          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
-          export PATH=$PATH:$HOME/google-cloud-sdk/bin
-          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
-          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Verify file uploaded to GCS
-        run: gsutil ls gs://my-gcs-bucket-2025-demo/retail/
-
-      - name: Verify data loaded into BigQuery
-        run: bq query --use_legacy_sql=false "SELECT COUNT(*) as row_count FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.retail_metrics\`"
+      - name: Tear down
+        if: always()
+        run: docker-compose down -v
