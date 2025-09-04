@@ -1,97 +1,109 @@
-name: CI
+name: e2e-test
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
 
 jobs:
-  build:
+  e2e-test:
     runs-on: ubuntu-latest
+    env:
+      AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW__CORE__FERNET_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
 
     steps:
-      # 1. リポジトリ取得
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      # 2. メモリ不足対策 (swap 10GB)
-      - name: Add swap to prevent OOM
+      - name: Install dependencies
         run: |
-          sudo swapoff -a
-          sudo fallocate -l 10G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+          sudo apt-get update
+          sudo apt-get install -y docker-compose python3-pip curl
+          pip install apache-airflow[gcp,aws]==2.7.2 pytest
 
-      # 3. Docker Compose セットアップ
-      - name: Set up Docker Compose
-        run: |
-          docker compose -f docker-compose.yml up -d
-          docker ps -a
+      - name: Start Airflow with Docker Compose
+        run: docker-compose up -d
 
-      # 4. Airflow DB 初期化
       - name: Initialize Airflow DB
-        run: |
-          docker compose exec -T airflow-webserver airflow db init
+        run: docker-compose exec -T airflow-webserver airflow db init
 
-      # 5. Airflow Variables のインポート
-      - name: Import Airflow Variables
+      # ✅ WebserverがHealthyになるまで待機
+      - name: Wait for Airflow webserver to be healthy
         run: |
-          if [ -f airflow_vars.json ]; then
-            docker compose cp airflow_vars.json airflow-webserver:/opt/airflow/airflow_vars.json
-            docker compose exec -T airflow-webserver airflow variables import /opt/airflow/airflow_vars.json
-          else
-            echo "No airflow_vars.json found, skipping import."
-          fi
+          echo "Waiting for Airflow webserver to be healthy..."
+          timeout 600 bash -c '
+            until curl -sf http://localhost:8080/health | grep -q "\"status\": \"healthy\""; do
+              echo "⏳ Webserver not ready yet..."
+              sleep 10
+            done
+          '
+          echo "✅ Airflow webserver is healthy!"
 
-      # 6. Airflow Webserver 起動待ち
-      - name: Wait for Airflow webserver to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep '"metadatabase":.*"healthy"' > /dev/null; then
-              echo "✅ Airflow webserver is ready"
-              exit 0
-            fi
-            echo "Waiting for Airflow webserver..."
-            sleep 10
-          done
-          echo "❌ Airflow webserver did not become ready in time"
-          exit 1
+      # ✅ 認証確認ステップを追加
+      - name: Test GCS connection
+        run: docker-compose exec -T airflow-webserver airflow connections test google_cloud_default
 
-      # 7. DAG 実行トリガー
+      - name: Test BigQuery connection
+        run: docker-compose exec -T airflow-webserver airflow connections test bigquery_default
+
+      - name: Test S3 connection
+        run: docker-compose exec -T airflow-webserver airflow connections test aws_default
+
+      # ✅ DAG実行はHealthy & 認証確認後
       - name: Trigger DAG run
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger industry_metrics_from_input
+          EXEC_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
+          echo "EXEC_DATE=$EXEC_DATE" >> $GITHUB_ENV
+          docker-compose exec -T airflow-webserver \
+            airflow dags trigger -e "$EXEC_DATE" industry_metrics_from_input
 
-      # 8. DAG 完了待ち (30分)
-      - name: Wait for DAG to finish (max 30 min)
+      # ✅ DAG実行完了まで待機（stateで判定）
+      - name: Wait for DAG run to complete
         run: |
-          echo "Checking DAG runs for industry_metrics_from_input"
-          for i in {1..180}; do  # 最大30分 (180 * 10秒)
-            state=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_from_input --no-backfill --output json | jq -r '.[0].state' || echo "not_found")
-            echo "Current state: $state"
-            if [[ "$state" == "success" ]]; then
-              echo "✅ DAG finished successfully"
+          for i in {1..60}; do
+            STATUS=$(docker-compose exec -T airflow-webserver \
+              airflow dags state industry_metrics_from_input $EXEC_DATE)
+            echo "⏳ Current status: $STATUS"
+            if [[ "$STATUS" == "success" ]]; then
+              echo "✅ DAG finished successfully!"
               exit 0
-            elif [[ "$state" == "failed" ]]; then
+            elif [[ "$STATUS" == "failed" ]]; then
               echo "❌ DAG failed"
               exit 1
             fi
-            sleep 10
+            sleep 30
           done
-          echo "⏰ Timed out waiting for DAG to finish (30 min limit)"
+          echo "❌ DAG did not finish within timeout"
           exit 1
 
-      # 9. pytest 実行
       - name: Run pytest (check output files)
-        run: |
-          docker compose exec -T airflow-webserver pytest tests/ || true
+        run: pytest tests/
 
-      # 10. 後始末
-      - name: Tear down
-        if: always()
+      # AWS / GCP CLI 確認はオプション
+      - name: Install AWS CLI
         run: |
-          docker compose down -v
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+
+      - name: Verify file uploaded to AWS S3
+        run: aws s3 ls s3://domoproject/metrics/
+
+      - name: Install gcloud CLI
+        run: |
+          echo "${{ secrets.GCP_SA_KEY }}" > ${HOME}/gcp-key.json
+          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
+          export PATH=$PATH:$HOME/google-cloud-sdk/bin
+          gcloud auth activate-service-account --key-file=${HOME}/gcp-key.json
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Verify file uploaded to GCS
+        run: gsutil ls gs://my-gcs-bucket-2025-demo/metrics/
+
+      - name: Verify data loaded into BigQuery
+        run: bq query --use_legacy_sql=false "SELECT COUNT(*) FROM \`${{ secrets.GCP_PROJECT_ID }}.${{ secrets.BIGQUERY_DATASET }}.retail_metrics\`"
