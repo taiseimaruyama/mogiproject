@@ -12,56 +12,46 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # OOM 対策で swap を追加
+      # ここで swap を 8GB に増設して OOM 対策
       - name: Add swap to prevent OOM
         run: |
           sudo swapoff -a
-          sudo fallocate -l 4G /swapfile
+          sudo fallocate -l 8G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      # Fernet Key をランダム生成（Secrets を使わない簡易版）
       - name: Generate Fernet Key
         run: echo "FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
 
-      # Docker Compose で Airflow コンテナ群を起動
       - name: Set up Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
-      # Airflow DB 初期化
       - name: Initialize Airflow DB
         run: docker compose exec -T airflow-webserver airflow db init
 
-      # Airflow Variables を variables.json からロード
       - name: Import Airflow Variables
         run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
-      # Airflow Webserver が起動するまでログを監視
-      - name: Wait for Airflow webserver
+      - name: Wait for Airflow webserver to be ready
         run: |
-          for i in {1..60}; do
-            if docker compose logs airflow-webserver 2>&1 | grep -q "Listening at:"; then
-              echo "Airflow Webserver is up!"
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health | grep '"status": "healthy"'; then
+              echo "Airflow Webserver is healthy!"
               exit 0
             fi
             echo "Waiting for Airflow Webserver..."
             sleep 10
           done
-          echo "Airflow Webserver failed to start"
-          docker compose logs airflow-webserver
-          exit 1
+          echo "Airflow Webserver failed to start in time" && exit 1
 
-      # DAG をトリガー（test_dag.py を実行）
       - name: Trigger DAG run
         run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
-      # output/ のファイルが正しく生成されたか Pytest で確認
       - name: Run pytest (check output files)
         run: pytest tests/
 
-      # 終了後に必ずコンテナ群を停止・削除
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml down -v
