@@ -2,18 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up job
-        run: echo "Start CI job"
-
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -25,82 +22,72 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # ---- Docker Compose を使って Airflow 起動 ----
-      - name: Set up Docker Compose
+      # ✅ Fernet key をランダム生成
+      - name: Generate Fernet key
         run: |
-          docker compose -f docker-compose.yml up -d
-          docker ps -a
+          echo "FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
 
-      # ---- Airflow Webserver の Healthy 判定 ----
+      - name: Set up Docker Compose
+        run: docker compose -f docker-compose.yml up -d
+
       - name: Wait for Airflow webserver to be healthy
         run: |
-          echo "Waiting for Airflow webserver to be healthy..."
-          for i in {1..60}; do
-            if docker compose ps | grep "healthy"; then
+          echo "Waiting for Airflow webserver..."
+          for i in {1..30}; do
+            if docker compose exec -T airflow-webserver curl -sf http://localhost:8080/health; then
               echo "✅ Airflow webserver is healthy"
               exit 0
-            else
-              echo "⏳ Webserver not ready yet..."
-              sleep 10
             fi
+            echo "⏳ Webserver not ready yet..."
+            sleep 20
           done
-          echo "❌ Timeout: Airflow webserver did not become healthy"
-          docker compose logs
+          echo "❌ Airflow webserver did not become healthy"
+          docker compose logs airflow-webserver
           exit 1
 
-      # ---- GCS 接続テスト ----
       - name: Test GCS connection
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow connections get google_cloud_default || true
+          echo "Testing GCS..."
+          docker compose exec -T airflow-webserver gsutil ls || true
 
-      # ---- S3 接続テスト ----
       - name: Test S3 connection
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow connections get aws_default || true
+          echo "Testing S3..."
+          docker compose exec -T airflow-webserver aws s3 ls || true
 
-      # ---- BigQuery 接続テスト ----
       - name: Test BigQuery connection
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow connections get bigquery_default || true
+          echo "Testing BigQuery..."
+          docker compose exec -T airflow-webserver bq ls || true
 
-      # ---- DAG 実行 ----
       - name: Trigger DAG run
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger industry_metrics_from_input
+          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_from_input
 
-      # ---- DAG 完了待機 (10分) ----
       - name: Wait for DAG to finish (max 10 min)
         run: |
-          echo "Waiting for DAG to finish..."
-          for i in {1..60}; do
-            state=$(docker compose exec -T airflow-webserver \
-              airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1)
-            echo "Current DAG state: $state"
-            if [[ "$state" == *"success"* ]]; then
+          echo "Waiting for DAG state..."
+          for i in {1..30}; do
+            state=$(docker compose exec -T airflow-webserver airflow dags state industry_metrics_from_input $(date +%Y-%m-%d) | tail -n 1 | awk '{print $2}')
+            echo "DAG state: $state"
+            if [ "$state" = "success" ]; then
               echo "✅ DAG finished successfully"
               exit 0
-            elif [[ "$state" == *"failed"* ]]; then
+            elif [ "$state" = "failed" ]; then
               echo "❌ DAG failed"
-              docker compose logs
+              docker compose logs airflow-webserver
               exit 1
-            else
-              sleep 10
             fi
+            sleep 20
           done
-          echo "❌ Timeout waiting for DAG"
-          docker compose logs
+          echo "❌ DAG did not finish in time"
+          docker compose logs airflow-webserver
           exit 1
 
-      # ---- Pytest 実行 ----
       - name: Run pytest (check output files)
         run: |
-          docker compose exec -T airflow-webserver pytest tests || true
+          docker compose exec -T airflow-webserver pytest /opt/airflow/tests
 
-      # ---- 終了処理 ----
       - name: Tear down
         if: always()
         run: docker compose down -v
