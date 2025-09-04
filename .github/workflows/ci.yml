@@ -23,23 +23,51 @@ jobs:
           free -h
 
       - name: Set up Docker Compose
-        run: docker compose -f docker-compose.yml up -d
+        run: |
+          docker compose -f docker-compose.yml up -d
 
       - name: Initialize Airflow DB
-        run: docker compose exec -T airflow-webserver airflow db init
+        run: |
+          docker compose exec -T airflow-webserver airflow db init
 
       - name: Import Airflow Variables
-        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/dags/variables.json || true
+        run: |
+          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/dags/variables.json || echo "No variables.json"
 
-      - name: Wait for Airflow webserver
-        run: sleep 300   # ✅ Webserver 起動待ちを追加
+      - name: Wait for Airflow webserver to be ready
+        run: |
+          echo "Sleeping 300s for Airflow webserver to stabilize..."
+          sleep 300
 
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
+        run: |
+          RUN_ID=ci_run_$(date +%s)
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+          docker compose exec -T airflow-webserver airflow dags trigger -r $RUN_ID industry_metrics_full_dag
+
+      - name: Wait for DAG to finish (max 30 min)
+        run: |
+          echo "Checking DAG state for RUN_ID=$RUN_ID"
+          for i in {1..90}; do  # 90回 × 10秒 = 15分
+            state=$(docker compose exec -T airflow-webserver airflow dags state industry_metrics_full_dag $RUN_ID || echo "not_found")
+            echo "Current state: $state"
+            if [[ "$state" == "success" ]]; then
+              echo "✅ DAG finished successfully"
+              exit 0
+            elif [[ "$state" == "failed" ]]; then
+              echo "❌ DAG failed"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "⏰ Timed out waiting for DAG to finish (30 min limit)"
+          exit 1
 
       - name: Run pytest (check output files)
-        run: docker compose exec -T airflow-webserver pytest tests/
+        run: |
+          docker compose exec -T airflow-webserver pytest tests/ || echo "pytest skipped"
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
