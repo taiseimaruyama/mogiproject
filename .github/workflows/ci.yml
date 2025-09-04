@@ -1,66 +1,67 @@
-name: e2e-test
+name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Add swap (2GB) to prevent OOM
+      # OOM 対策で swap を追加
+      - name: Add swap to prevent OOM
         run: |
-          sudo swapoff -a || true
-          sudo fallocate -l 2G /swapfile
+          sudo swapoff -a
+          sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
+      # Fernet Key をランダム生成（Secrets を使わない簡易版）
+      - name: Generate Fernet Key
+        run: echo "FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
+
+      # Docker Compose で Airflow コンテナ群を起動
       - name: Set up Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
+      # Airflow DB 初期化
       - name: Initialize Airflow DB
-        run: |
-          set -e
-          if docker compose exec -T airflow-webserver airflow db --help | grep -q migrate; then
-            echo "Using airflow db migrate"
-            docker compose exec -T airflow-webserver airflow db migrate
-          else
-            echo "Using airflow db init"
-            docker compose exec -T airflow-webserver airflow db init
-          fi
+        run: docker compose exec -T airflow-webserver airflow db init
 
+      # Airflow Variables を variables.json からロード
       - name: Import Airflow Variables
-        run: |
-          docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
 
+      # Airflow Webserver が起動するまでログを監視
       - name: Wait for Airflow webserver
         run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
+          for i in {1..60}; do
+            if docker compose logs airflow-webserver 2>&1 | grep -q "Listening at:"; then
               echo "Airflow Webserver is up!"
               exit 0
             fi
             echo "Waiting for Airflow Webserver..."
             sleep 10
           done
+          echo "Airflow Webserver failed to start"
+          docker compose logs airflow-webserver
           exit 1
 
+      # DAG をトリガー（test_dag.py を実行）
       - name: Trigger DAG run
         run: docker compose exec -T airflow-webserver airflow dags trigger test_dag
 
+      # output/ のファイルが正しく生成されたか Pytest で確認
       - name: Run pytest (check output files)
-        run: |
-          pip install pytest
-          pytest tests/
+        run: pytest tests/
 
+      # 終了後に必ずコンテナ群を停止・削除
       - name: Tear down
         if: always()
         run: docker compose down -v
