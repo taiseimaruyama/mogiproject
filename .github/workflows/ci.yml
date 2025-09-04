@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -16,7 +16,6 @@ jobs:
 
       - name: Add swap to prevent OOM
         run: |
-          sudo swapoff -a || true
           sudo fallocate -l 10G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
@@ -30,24 +29,16 @@ jobs:
         run: docker compose exec -T airflow-webserver airflow db init
 
       - name: Import Airflow Variables
-        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/variables.json
+        run: docker compose exec -T airflow-webserver airflow variables import /opt/airflow/dags/variables.json || true
 
-      - name: Wait for Airflow webserver to be ready
-        run: |
-          for i in {1..30}; do
-            if docker compose exec -T airflow-webserver curl -f http://localhost:8080/health; then
-              echo "Airflow webserver is ready!"
-              break
-            fi
-            echo "Waiting for Airflow Webserver..."
-            sleep 10
-          done
+      - name: Wait for Airflow webserver
+        run: sleep 300   # ✅ Webserver 起動待ちを追加
 
       - name: Trigger DAG run
-        run: docker compose exec -T airflow-webserver airflow dags trigger test_dag || true
+        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
 
       - name: Run pytest (check output files)
-        run: docker compose exec -T airflow-webserver bash -c "pytest /opt/airflow/tests/"
+        run: docker compose exec -T airflow-webserver pytest tests/
 
       - name: Tear down
         if: always()
