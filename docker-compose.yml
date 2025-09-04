@@ -35,6 +35,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+    user: "50000:50000"   # ← Airflow 推奨の実行ユーザー
 
   airflow-scheduler:
     image: apache/airflow:2.7.2
@@ -52,6 +53,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+    user: "50000:50000"   # ← これを追加
 
 volumes:
   postgres_data:
