@@ -3,6 +3,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
+from airflow.models import Variable
 from datetime import datetime
 import pandas as pd
 import os
@@ -11,7 +12,7 @@ import os
 # ==== 前処理関数 ====
 def preprocess_retail(**context):
     df = pd.read_csv("input/retail.csv")
-    # 例: 欠損処理や集計
+    # サンプル前処理
     df["stockout_rate"] = (df["stockout"] / df["stock"]) * 100
     df["lost_sales"] = df["stockout"] * df["price"]
 
@@ -23,7 +24,7 @@ def preprocess_retail(**context):
 
 def preprocess_ads(**context):
     df = pd.read_csv("input/ads.csv")
-    # CTR, ROAS の計算例
+    # サンプル前処理
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
 
@@ -53,34 +54,34 @@ with DAG(
         python_callable=preprocess_ads,
     )
 
-    # Retail を GCS にアップロード
+    # Retail → GCS
     upload_retail_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_gcs",
         src="output/retail_processed.csv",
         dst="retail/retail_processed.csv",
-        bucket="{{ var.value.gcs_bucket }}",  # Airflow Variable で指定
+        bucket=Variable.get("gcs_bucket"),
     )
 
     # GCS → BigQuery
     load_retail_bigquery = GCSToBigQueryOperator(
         task_id="load_retail_bigquery",
-        bucket="{{ var.value.gcs_bucket }}",
+        bucket=Variable.get("gcs_bucket"),
         source_objects=["retail/retail_processed.csv"],
-        destination_project_dataset_table="{{ var.value.bq_dataset }}.retail_kpi",
+        destination_project_dataset_table=f"{Variable.get('bq_dataset')}.retail_kpi",
         write_disposition="WRITE_TRUNCATE",
         source_format="CSV",
         autodetect=True,
     )
 
-    # Ads を S3 にアップロード
+    # Ads → S3
     upload_ads_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_s3",
         filename="output/ads_processed.csv",
         dest_key="ads/ads_processed.csv",
-        dest_bucket="{{ var.value.s3_bucket }}",
+        dest_bucket=Variable.get("s3_bucket"),
         replace=True,
     )
 
-    # 依存関係
+    # DAG依存関係
     preprocess_retail_task >> upload_retail_gcs >> load_retail_bigquery
     preprocess_ads_task >> upload_ads_s3
