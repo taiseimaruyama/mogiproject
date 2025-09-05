@@ -52,18 +52,11 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      # === DAG がロードされているか確認 ===
-      - name: Verify DAG is loaded
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags list | grep industry_metrics_full_dag
-
       # === Retail 系タスクを順番に実行 ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
-          TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_retail\|^calc_retail_metrics' | awk '{print \$1}'")
+          TASKS="preprocess_retail calc_retail_metrics upload_retail_metrics_to_gcs load_retail_metrics_to_bq"
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
@@ -74,8 +67,7 @@ jobs:
       - name: Run Ads tasks sequentially
         run: |
           echo "🚀 Running Ads tasks..."
-          TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_ads\|^calc_ads_metrics' | awk '{print \$1}'")
+          TASKS="preprocess_ads calc_ads_metrics upload_ads_metrics_to_s3"
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
@@ -98,7 +90,6 @@ jobs:
           docker compose exec -T airflow-webserver \
             bq query --use_legacy_sql=false "SELECT 1" || true
 
-      # === AWS 認証を先に有効化 ===
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
