@@ -60,7 +60,7 @@ jobs:
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
+              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
           done
 
       # === Ads 系タスクを順番に実行 ===
@@ -71,7 +71,7 @@ jobs:
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
+              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
           done
 
       - name: Test GCS connection
