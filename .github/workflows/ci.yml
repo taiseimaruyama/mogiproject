@@ -43,11 +43,15 @@ jobs:
           sudo swapon /swapfile
           free -h
 
+      # Airflow DB 初期化
+      - name: Initialize Airflow DB
+        run: docker compose run --rm airflow-init
+
       # docker compose に統一済み
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
-      # Webserver のヘルスチェック & ログ追従（待っている間ずっと表示）
+      # Webserver のヘルスチェック & ログ追従
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
@@ -70,6 +74,8 @@ jobs:
           done
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
+            docker compose logs airflow-webserver || true
+            docker compose logs airflow-scheduler || true
             exit 1
           fi
           kill $LOGS_PID || true
