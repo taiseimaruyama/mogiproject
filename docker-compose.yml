@@ -80,6 +80,8 @@ services:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
@@ -87,4 +89,4 @@ services:
     command: bash -c "airflow db init && airflow users create --username airflow --password airflow --firstname admin --lastname user --role Admin --email admin@example.com"
 
 volumes:
-  postgres-db-volume:
+  postgres-db-volume: {}
