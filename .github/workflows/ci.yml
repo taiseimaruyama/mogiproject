@@ -40,26 +40,28 @@ jobs:
           free -h
 
       # Airflow 初期化
-      - name: Initialize Airflow
+      - name: Initialize Airflow database
         run: docker compose run --rm airflow-webserver airflow db init
 
       # docker compose に統一済み
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
-      # Webserver のヘルスチェック & ログ追従 (metadatabase + scheduler healthy 判定)
+      # Webserver のヘルスチェック (改良版)
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "⏳ Waiting 120s for Airflow to initialize..."
           sleep 120
 
           echo "🔍 Starting health check loop..."
-          docker compose logs -f airflow-webserver &
+          docker compose logs -f airflow-webserver | tee airflow-webserver.log &
           LOGS_PID=$!
-          timeout=600
+
+          timeout=900
           interval=10
           elapsed=0
           healthy=false
+
           while [ $elapsed -lt $timeout ]; do
             STATUS=$(curl -s http://localhost:8080/health || true)
             echo "Health response: $STATUS"
@@ -73,10 +75,11 @@ jobs:
             sleep $interval
             elapsed=$((elapsed + interval))
           done
+
           kill $LOGS_PID || true
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
-            docker compose logs airflow-webserver
+            cat airflow-webserver.log
             exit 1
           fi
 
