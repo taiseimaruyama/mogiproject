@@ -129,7 +129,7 @@ jobs:
         if: always()
         run: docker compose logs airflow-worker
 
-      - name: Show task logs (always)
+      - name: Show all task logs (always)
         if: always()
         run: |
           run_id=$(docker compose run --rm airflow-cli \
@@ -137,11 +137,12 @@ jobs:
             | head -n 5 | tail -n 1 | awk '{print $3}')
           echo "📄 Fetching logs for DAG Run: $run_id"
 
-          docker compose run --rm airflow-cli \
-            airflow tasks logs industry_metrics_full_dag preprocess_retail "$run_id" || true
+          tasks=$(docker compose run --rm airflow-cli airflow tasks list industry_metrics_full_dag | awk '{print $1}' | tail -n +2)
 
-          docker compose run --rm airflow-cli \
-            airflow tasks logs industry_metrics_full_dag preprocess_ads "$run_id" || true
+          for t in $tasks; do
+            echo "🔎 Logs for task: $t"
+            docker compose run --rm airflow-cli airflow tasks logs industry_metrics_full_dag "$t" "$run_id" || true
+          done
 
       - name: Stop containers
         if: always()
