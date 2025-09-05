@@ -109,6 +109,7 @@ services:
           --email admin@example.com
         echo "🔹 Setting Airflow variables..."
         airflow variables set gcs_bucket domoproject
+        airflow variables set bq_dataset sales_dataset
         echo "✅ Airflow init completed"
 
   airflow-cli:
