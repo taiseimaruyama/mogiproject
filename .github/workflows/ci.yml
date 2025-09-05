@@ -29,6 +29,12 @@ jobs:
       - name: Ensure DB is initialized
         run: docker compose run --rm airflow-cli airflow db check
 
+      - name: Set Airflow Variables
+        run: |
+          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
+          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
+          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
+
       - name: Start Airflow
         run: docker compose up -d
 
@@ -45,12 +51,6 @@ jobs:
             [ "$ok" = true ] && echo "✅ Airflow is running" && break
             sleep 10
           done
-
-      - name: Set Airflow Variables
-        run: |
-          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
-          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
-          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
 
       - name: Check DAG import errors
         run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
