@@ -52,7 +52,7 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      # === Retail 系タスクを固定順で実行 ===
+      # === Retail 系タスクを順番に実行（固定） ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
@@ -63,7 +63,7 @@ jobs:
               airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
           done
 
-      # === Ads 系タスクを固定順で実行 ===
+      # === Ads 系タスクを順番に実行（固定） ===
       - name: Run Ads tasks sequentially
         run: |
           echo "🚀 Running Ads tasks..."
