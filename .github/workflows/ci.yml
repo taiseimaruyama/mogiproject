@@ -63,19 +63,20 @@ jobs:
       # === DAG の完了を最大30分監視 ===
       - name: Wait for DAG completion (30 min)
         run: |
-          echo "Monitoring DAG Run (today's execution)"
+          echo "Monitoring DAG Run (latest run)"
           for i in {1..90}; do   # 30分監視 (90回 × 20秒)
-            status=$(docker compose exec -T airflow-webserver \
-              airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d) \
-              | tail -n 1)
-            echo "DAG status: $status"
+            latest=$(docker compose exec -T airflow-webserver \
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+            echo "Latest run: $latest"
 
-            if echo "$status" | grep "success"; then
+            if echo "$latest" | grep "success"; then
               echo "✅ DAG finished successfully"
               exit 0
-            elif echo "$status" | grep "failed"; then
+            elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
               exit 1
+            elif echo "$latest" | grep "running"; then
+              echo "⏳ DAG still running..."
             fi
 
             sleep 20
