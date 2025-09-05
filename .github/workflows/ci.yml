@@ -27,45 +27,41 @@ jobs:
       - name: Start Airflow with Docker Compose
         env:
           AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-        run: |
-          docker compose up -d
+        run: docker compose up -d
 
-      - name: Wait for Airflow webserver to be healthy (with logs follow)
+      - name: Wait for Airflow webserver to be healthy
         run: |
-          docker compose logs --follow airflow-webserver &
-          LOG_PID=$!
-
           for i in {1..24}; do
             if curl -s http://localhost:8080/health; then
               echo "✅ Airflow is healthy"
-              kill $LOG_PID
               exit 0
             fi
             echo "⏳ Still waiting... ($i)"
             sleep 5
           done
-
           echo "❌ Airflow did not become healthy in time"
-          kill $LOG_PID
           exit 1
 
-      - name: Trigger Airflow DAG (with live logs)
-        env:
-          AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      - name: Trigger Airflow DAG
         run: |
           echo "🚀 Triggering DAG industry_metrics_full_dag"
           docker compose exec -T airflow-webserver \
             airflow dags trigger industry_metrics_full_dag
 
+      # === リアルタイムで scheduler / worker / webserver のログを流す ===
+      - name: Stream Airflow logs + Wait for DAG result
+        run: |
           echo "📡 Streaming Airflow logs in real-time..."
-          docker compose logs --follow airflow-scheduler &
+          docker compose logs --tail=200 -f airflow-scheduler &
           PID1=$!
-          docker compose logs --follow airflow-webserver &
+          docker compose logs --tail=200 -f airflow-worker &
           PID2=$!
-          docker compose logs --follow airflow-worker &
+          docker compose logs --tail=200 -f airflow-webserver &
           PID3=$!
 
-          for i in {1..10}; do   # 30秒間隔 × 10回 = 最大5分
+          for i in {1..20}; do   # 30秒 × 20回 = 最大10分
+            echo "⏳ Checking DAG status... ($i)"
+            
             RUNS=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state success | tail -n +3 | wc -l)
             if [ "$RUNS" -gt 0 ]; then
@@ -79,15 +75,26 @@ jobs:
             if [ "$FAILS" -gt 0 ]; then
               echo "❌ DAG failed"
               kill $PID1 $PID2 $PID3 || true
+              echo "📜 === Scheduler logs (last 200) ==="
+              docker compose logs --tail=200 airflow-scheduler
+              echo "📜 === Worker logs (last 200) ==="
+              docker compose logs --tail=200 airflow-worker
+              echo "📜 === Webserver logs (last 200) ==="
+              docker compose logs --tail=200 airflow-webserver
               exit 1
             fi
 
-            echo "⏳ DAG still running... ($i)"
             sleep 30
           done
 
-          echo "❌ DAG did not finish within 5 minutes"
+          echo "❌ DAG did not finish within 10 minutes"
           kill $PID1 $PID2 $PID3 || true
+          echo "📜 === Scheduler logs (last 200) ==="
+          docker compose logs --tail=200 airflow-scheduler
+          echo "📜 === Worker logs (last 200) ==="
+          docker compose logs --tail=200 airflow-worker
+          echo "📜 === Webserver logs (last 200) ==="
+          docker compose logs --tail=200 airflow-webserver
           exit 1
 
       - name: Test GCS connection
