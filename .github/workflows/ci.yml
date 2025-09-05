@@ -57,11 +57,11 @@ jobs:
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep '^retail_' | awk '{print \$1}'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_retail\|^calc_retail_metrics\|^upload_retail\|^load_retail' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
           done
 
       # === Ads 系タスクを順番に実行 ===
@@ -69,12 +69,20 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep '^ads_' | awk '{print \$1}'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_ads\|^calc_ads_metrics\|^upload_ads' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
           done
+
+      # === 出力確認 ===
+      - name: Check output files (container + host)
+        run: |
+          echo "📂 Inside container:"
+          docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
+          echo "📂 On host:"
+          ls -l ./output || true
 
       - name: Test GCS connection
         run: |
