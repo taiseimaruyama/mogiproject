@@ -26,9 +26,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Debug docker-compose
-        run: docker compose config
-
       - name: Set up GCP credentials
         run: |
           mkdir -p keys
@@ -40,64 +37,54 @@ jobs:
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
 
-      - name: Extra wait before Airflow health check
-        run: |
-          echo "⏳ Waiting 3 minutes for Airflow components..."
-          sleep 180
-
       - name: Show running containers
         run: docker compose ps -a
 
+      # 🔽 ここを 3分待機 から「全コンポーネント起動待ち」に変更
       - name: Wait for Airflow components to be ready
         run: |
           echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
-          for i in {1..60}; do
-            # Webserver health
-            if curl -s http://localhost:8080/health | grep '"status": "healthy"'; then
-              echo "✅ Webserver healthy"
-            else
-              echo "❌ Webserver not ready"
-              sleep 5
-              continue
+          for i in {1..120}; do
+            webserver_ok=false
+            scheduler_ok=false
+            worker_ok=false
+
+            if curl -s http://localhost:8080/health | grep '"status": "healthy"' >/dev/null; then
+              webserver_ok=true
             fi
 
-            # Scheduler heartbeat
             if docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob >/dev/null 2>&1; then
-              echo "✅ Scheduler running"
-            else
-              echo "❌ Scheduler not ready"
-              sleep 5
-              continue
+              scheduler_ok=true
             fi
 
-            # Worker process check (not jobs check)
-            if docker compose exec -T airflow-worker ps aux | grep "celery worker" | grep -v grep; then
-              echo "✅ Worker process running"
+            if docker compose exec -T airflow-worker ps aux | grep "celery worker" | grep -v grep >/dev/null; then
+              worker_ok=true
+            fi
+
+            if $webserver_ok && $scheduler_ok && $worker_ok; then
+              echo "✅ All Airflow components are ready"
               exit 0
-            else
-              echo "❌ Worker not ready"
             fi
 
+            echo "⏳ Still waiting... ($i)"
             sleep 5
           done
-          echo "❌ Airflow components not ready in time"
-          exit 1
 
-      - name: Debug Airflow worker logs
-        if: always()
-        run: docker compose logs --tail=200 airflow-worker
+          echo "❌ Airflow components did not become ready in time"
+          echo "📜 Dumping worker logs for debugging..."
+          docker compose logs --tail=200 airflow-worker
+          exit 1
 
       - name: Trigger DAG
         run: |
-          RUN_ID="ci_run_$(date +%s)"
-          echo "Triggering DAG with run_id=$RUN_ID"
-          docker compose exec -T airflow-webserver airflow dags trigger -r $RUN_ID industry_metrics_full_dag
-          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+          export RUN_ID="ci_run_$(date +%s)"
+          echo "Using RUN_ID=$RUN_ID"
+          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag --run-id "$RUN_ID"
 
       - name: Wait for DAG completion (30 min)
         run: |
           echo "Monitoring DAG Run (latest run)"
-          for i in {1..90}; do
+          for i in {1..360}; do
             latest=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | grep "$RUN_ID" | head -n 1)
             echo "Latest run: $latest"
@@ -108,13 +95,13 @@ jobs:
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
               exit 1
-            elif echo "$latest" | grep "running"; then
-              echo "⏳ DAG still running..."
             fi
 
-            sleep 20
+            echo "⏳ DAG still running..."
+            sleep 5
           done
-          echo "⏰ DAG did not finish in 30 minutes"
+
+          echo "❌ DAG did not finish in 30 minutes"
           exit 1
 
       - name: Configure AWS credentials
@@ -126,13 +113,17 @@ jobs:
 
       - name: Test GCS connection
         run: |
+          echo "Testing GCS connection..."
           docker compose exec -T airflow-webserver gsutil ls gs://${{ secrets.GCS_BUCKET }} || true
 
       - name: Test S3 connection
-        run: aws s3 ls s3://domoproject || true
+        run: |
+          echo "Testing S3 connection..."
+          aws s3 ls s3://domoproject || true
 
       - name: Test BigQuery connection
         run: |
+          echo "Testing BigQuery connection..."
           docker compose exec -T airflow-webserver \
             bq query --use_legacy_sql=false "SELECT 1" || true
 
@@ -146,3 +137,7 @@ jobs:
           else
             echo "⚠️ No output directory found"
           fi
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down
