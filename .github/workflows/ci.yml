@@ -20,7 +20,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # DB 初期化 + ユーザ作成 + 変数設定
       - name: Initialize Airflow DB + User + Variables
         run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
 
@@ -90,8 +89,8 @@ jobs:
       - name: Upload output files to S3
         run: aws s3 cp ./output s3://domoproject/ --recursive
 
-      - name: Show airflow-init logs (if failed)
-        if: failure()
+      - name: Show airflow-init logs (always)
+        if: always()
         run: docker compose logs airflow-init
 
       - name: Stop containers
