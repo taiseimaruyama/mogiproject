@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Initialize Airflow DB
+      - name: Initialize Airflow DB + User + Variables
         run: docker compose run --rm airflow-init
 
       - name: Start Airflow
@@ -39,9 +39,6 @@ jobs:
             [ "$ok" = true ] && echo "✅ Airflow is running" && break
             sleep 10
           done
-
-      - name: Set Airflow Variables
-        run: docker compose run --rm airflow-cli airflow variables set gcs_bucket domoproject
 
       - name: Check DAG import errors
         run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
