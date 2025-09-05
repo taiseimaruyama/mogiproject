@@ -41,15 +41,15 @@ jobs:
           done
 
       - name: Set Airflow Variables
-        run: docker compose run --rm airflow-cli -- \
+        run: docker compose run --rm airflow-cli \
           bash -c "airflow variables set gcs_bucket domoproject"
 
       - name: Check DAG import errors
-        run: docker compose run --rm airflow-cli -- \
+        run: docker compose run --rm airflow-cli \
           bash -c "airflow dags list-import-errors || true"
 
       - name: List DAGs
-        run: docker compose run --rm airflow-cli -- \
+        run: docker compose run --rm airflow-cli \
           bash -c "airflow dags list"
 
       - name: Prepare dummy input data
@@ -64,14 +64,14 @@ jobs:
           echo "5,50,100,25" >> input/ads.csv
 
       - name: Trigger DAG
-        run: docker compose run --rm airflow-cli -- \
+        run: docker compose run --rm airflow-cli \
           bash -c "airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag"
 
       - name: Wait for DAG completion (with debug)
         run: |
           echo "⏳ Monitoring DAG Run"
           for i in {1..90}; do
-            latest=$(docker compose run --rm airflow-cli -- \
+            latest=$(docker compose run --rm airflow-cli \
               bash -c "airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1")
             echo "Latest: $latest"
 
@@ -80,7 +80,7 @@ jobs:
               break
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
-              docker compose run --rm airflow-cli -- \
+              docker compose run --rm airflow-cli \
                 bash -c "airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')"
               exit 1
             fi
