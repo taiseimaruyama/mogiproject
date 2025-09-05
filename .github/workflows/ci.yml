@@ -58,14 +58,14 @@ jobs:
 
       - name: Trigger DAG
         run: docker compose exec -T airflow-webserver \
-          airflow dags trigger -d industry_metrics_full_dag ci_run_${{ github.run_id }}
+          bash -c "airflow dags trigger -d industry_metrics_full_dag ci_run_${{ github.run_id }}"
 
       - name: Wait for DAG completion (30 min)
         run: |
           echo "Monitoring DAG Run (latest run)"
           for i in {1..90}; do
             latest=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+              bash -c "airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1")
             echo "Latest run: $latest"
             if echo "$latest" | grep "success"; then
               echo "✅ DAG finished successfully"
