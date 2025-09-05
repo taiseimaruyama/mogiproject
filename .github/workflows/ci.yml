@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep 'retail_' | awk '{print \$1}'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^retail_' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
@@ -69,7 +69,7 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag | grep 'ads_' | awk '{print \$1}'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^ads_' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
