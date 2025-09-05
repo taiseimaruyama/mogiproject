@@ -40,53 +40,43 @@ jobs:
       - name: Show running containers
         run: docker compose ps -a
 
-      # 🔽 ここを 3分待機 から「全コンポーネント起動待ち」に変更
-      - name: Wait for Airflow components to be ready
+      - name: Wait for Airflow components to be ready (with worker logs)
         run: |
           echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
-          for i in {1..120}; do
-            webserver_ok=false
-            scheduler_ok=false
-            worker_ok=false
+          for i in {1..30}; do
+            WEB_OK=$(docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep '"status": "healthy"' || true)
+            SCH_OK=$(docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob --hostname "$(hostname)" || true)
+            WRK_OK=$(docker compose ps | grep airflow-worker | grep "Up" || true)
 
-            if curl -s http://localhost:8080/health | grep '"status": "healthy"' >/dev/null; then
-              webserver_ok=true
-            fi
-
-            if docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob >/dev/null 2>&1; then
-              scheduler_ok=true
-            fi
-
-            if docker compose exec -T airflow-worker ps aux | grep "celery worker" | grep -v grep >/dev/null; then
-              worker_ok=true
-            fi
-
-            if $webserver_ok && $scheduler_ok && $worker_ok; then
-              echo "✅ All Airflow components are ready"
+            if [ -n "$WEB_OK" ] && [ -n "$SCH_OK" ] && [ -n "$WRK_OK" ]; then
+              echo "✅ All components are ready"
               exit 0
             fi
 
             echo "⏳ Still waiting... ($i)"
-            sleep 5
-          done
+            echo "---- airflow-worker logs (last 20 lines) ----"
+            docker compose logs --tail=20 airflow-worker || true
+            echo "-------------------------------------------"
 
+            sleep 20
+          done
           echo "❌ Airflow components did not become ready in time"
-          echo "📜 Dumping worker logs for debugging..."
-          docker compose logs --tail=200 airflow-worker
           exit 1
 
       - name: Trigger DAG
         run: |
-          export RUN_ID="ci_run_$(date +%s)"
-          echo "Using RUN_ID=$RUN_ID"
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag --run-id "$RUN_ID"
+          RUN_ID="ci_run_$(date +%s)"
+          echo "Triggering DAG industry_metrics_full_dag with run_id=$RUN_ID"
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger industry_metrics_full_dag --run-id "$RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
 
       - name: Wait for DAG completion (30 min)
         run: |
           echo "Monitoring DAG Run (latest run)"
-          for i in {1..360}; do
+          for i in {1..90}; do
             latest=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | grep "$RUN_ID" | head -n 1)
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | grep "$RUN_ID" | head -n 1 || true)
             echo "Latest run: $latest"
 
             if echo "$latest" | grep "success"; then
@@ -97,10 +87,9 @@ jobs:
               exit 1
             fi
 
-            echo "⏳ DAG still running..."
-            sleep 5
+            echo "⏳ DAG still running... ($i)"
+            sleep 20
           done
-
           echo "❌ DAG did not finish in 30 minutes"
           exit 1
 
