@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      GOOGLE_APPLICATION_CREDENTIALS: /github/workspace/keys/gcp.json
 
     services:
       docker:
@@ -52,12 +53,26 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
+      # === 共通タスクを順番に実行 ===
+      - name: Run Common tasks sequentially
+        run: |
+          echo "🚀 Running Common tasks..."
+          TASKS=$(docker compose exec -T airflow-webserver \
+            airflow tasks list industry_metrics_full_dag --output table | tail -n +3 | awk '{print $1}' \
+            | grep -v "retail_" | grep -v "ads_")
+          for task in $TASKS; do
+            echo "🔎 Executing $task ..."
+            docker compose exec -T airflow-webserver \
+              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+          done
+
       # === Retail 系タスクを順番に実行 ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag | grep "retail_" | awk '{print $1}')
+            airflow tasks list industry_metrics_full_dag --output table | tail -n +3 | awk '{print $1}' \
+            | grep "retail_")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
@@ -69,7 +84,8 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag | grep "ads_" | awk '{print $1}')
+            airflow tasks list industry_metrics_full_dag --output table | tail -n +3 | awk '{print $1}' \
+            | grep "ads_")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
