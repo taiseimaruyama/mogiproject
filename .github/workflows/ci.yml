@@ -101,6 +101,10 @@ jobs:
         if: always()
         run: docker compose logs airflow-init
 
+      - name: Show worker logs (always)
+        if: always()
+        run: docker compose logs airflow-worker
+
       - name: Stop containers
         if: always()
         run: docker compose down -v
