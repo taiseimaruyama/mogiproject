@@ -1,4 +1,4 @@
-name: CI
+name: build
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
 
     services:
@@ -17,17 +17,16 @@ jobs:
           POSTGRES_USER: airflow
           POSTGRES_PASSWORD: airflow
           POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
+        # ports: 👈 削除（GitHub Actionsでは不要）
         options: >-
-          --health-cmd="pg_isready -U airflow"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
       redis:
         image: redis:latest
-        ports:
-          - 6379:6379
+        # ports: 👈 削除（GitHub Actionsでは不要）
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=10s
@@ -35,31 +34,39 @@ jobs:
           --health-retries=5
 
     env:
-      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-      AIRFLOW_UID: 50000
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
-        run: docker compose version
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
 
-      - name: Build and start services
+      - name: Install dependencies
         run: |
-          docker compose up -d --build
-          # 方法A: 起動待機（sleep 20）
-          sleep 20
-          # 方法B: DBチェック（1回だけ）
-          docker compose run --rm airflow-cli airflow db check
+          python -m pip install --upgrade pip
+          pip install apache-airflow[celery,postgres,redis]==2.6.3 \
+                      apache-airflow-providers-google \
+                      apache-airflow-providers-amazon \
+                      psycopg2-binary \
+                      pandas \
+                      boto3
 
       - name: Run Airflow init
-        run: docker compose run --rm airflow-init
+        run: |
+          docker compose run airflow-init
 
-      - name: Show airflow-init logs
+      - name: Show airflow-init logs (always)
+        if: always()
         run: docker compose logs airflow-init
 
       - name: Run scheduler
@@ -71,25 +78,29 @@ jobs:
       - name: Run webserver
         run: docker compose up -d airflow-webserver
 
-      - name: Show scheduler logs
+      - name: Show scheduler logs (always)
+        if: always()
         run: docker compose logs airflow-scheduler
 
-      - name: Show worker logs
+      - name: Show worker logs (always)
+        if: always()
         run: docker compose logs airflow-worker
 
-      # 👇 ここを追加：タスクの詳細ログを掘りに行く
-      - name: Show task logs (preprocess_retail)
-        run: |
-          docker compose run --rm airflow-cli \
-            airflow tasks logs industry_metrics_full_dag preprocess_retail ci_run_17490581132 || true
+      - name: Show webserver logs (always)
+        if: always()
+        run: docker compose logs airflow-webserver
 
-      - name: Show task logs (preprocess_ads)
+      - name: Wait for DAG completion (with debug)
         run: |
-          docker compose run --rm airflow-cli \
-            airflow tasks logs industry_metrics_full_dag preprocess_ads ci_run_17490581132 || true
+          sleep 10
+          docker compose ps
+          docker compose logs --tail=200
 
-      # DAG 全体を1回テスト実行
-      - name: Trigger DAG
+      - name: Upload output files to S3
+        if: always()
         run: |
-          docker compose run --rm airflow-cli \
-            airflow dags test industry_metrics_full_dag 2025-09-05
+          aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ci-output/ --recursive
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down
