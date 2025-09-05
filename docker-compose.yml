@@ -105,13 +105,11 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
-
-        # Variables を初期化（CIから受け取る）
-        airflow variables set gcs_bucket ${GCS_BUCKET}
-        airflow variables set bq_dataset ${BQ_DATASET}
-        airflow variables set s3_bucket ${S3_BUCKET}
-
-        echo "✅ Airflow init + Variables completed"
+        # Set required Variables here (方法A)
+        airflow variables set gcs_bucket ${GCS_BUCKET:-dummy_gcs}
+        airflow variables set bq_dataset ${BQ_DATASET:-dummy_dataset}
+        airflow variables set s3_bucket ${S3_BUCKET:-dummy_s3}
+        echo "✅ Airflow init + variables completed"
 
   airflow-cli:
     image: apache/airflow:2.8.1
