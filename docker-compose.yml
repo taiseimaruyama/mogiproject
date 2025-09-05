@@ -106,7 +106,7 @@ services:
           --role Admin \
           --email admin@example.com
 
-        # Variables を初期化
+        # Variables を初期化（CIから受け取る）
         airflow variables set gcs_bucket ${GCS_BUCKET}
         airflow variables set bq_dataset ${BQ_DATASET}
         airflow variables set s3_bucket ${S3_BUCKET}
