@@ -14,13 +14,13 @@ jobs:
       AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ap-northeast-1
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Initialize Airflow DB + User + Variables
+      - name: Initialize Airflow DB + User
         run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
 
       - name: Wait after DB init
@@ -46,6 +46,12 @@ jobs:
             sleep 10
           done
 
+      - name: Set Airflow Variables
+        run: |
+          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
+          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
+          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
+
       - name: Check DAG import errors
         run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
 
@@ -64,7 +70,8 @@ jobs:
           echo "5,50,100,25" >> input/ads.csv
 
       - name: Trigger DAG
-        run: docker compose run --rm airflow-cli airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+        run: docker compose run --rm airflow-cli \
+          airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
       - name: Wait for DAG completion (with debug)
         run: |
@@ -87,7 +94,7 @@ jobs:
           done
 
       - name: Upload output files to S3
-        run: aws s3 cp ./output s3://domoproject/ --recursive
+        run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
 
       - name: Show airflow-init logs (always)
         if: always()
