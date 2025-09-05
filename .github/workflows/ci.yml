@@ -56,19 +56,17 @@ jobs:
       - name: Trigger DAG
         id: trigger_dag
         run: |
-          run_id="ci_run_$(date +%s)"
           docker compose exec -T airflow-webserver \
-            airflow dags trigger industry_metrics_full_dag --run-id "$run_id"
-          echo "run_id=$run_id" >> $GITHUB_OUTPUT
+            airflow dags trigger industry_metrics_full_dag
+          echo "run_id=latest" >> $GITHUB_OUTPUT
 
       # === DAG の完了を最大30分監視 ===
       - name: Wait for DAG completion (30 min)
         run: |
-          run_id=${{ steps.trigger_dag.outputs.run_id }}
-          echo "Monitoring DAG Run: $run_id"
+          echo "Monitoring DAG Run (today's execution)"
           for i in {1..90}; do   # 30分監視 (90回 × 20秒)
             status=$(docker compose exec -T airflow-webserver \
-              airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d) --run-id "$run_id" \
+              airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d) \
               | tail -n 1)
             echo "DAG status: $status"
 
