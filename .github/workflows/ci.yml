@@ -10,11 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-
     steps:
       - name: Set up job
         run: echo "Starting CI job"
@@ -22,13 +17,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # GCP 認証
+      # GCP 認証 (Secrets 使用)
       - name: Set up GCP credentials
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
-      # AWS 認証
+      # AWS 認証 (Secrets 使用)
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -44,18 +39,17 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # Airflow 初期化
-      - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-init
-
-      # Webserver 起動
+      # docker compose に統一済み
       - name: Start Docker Compose
-        run: docker compose up -d
+        run: docker compose -f docker-compose.yml up -d
 
-      # ヘルスチェック & ログ
+      # Airflow 初期化待機 + ヘルスチェック
       - name: Wait for Airflow webserver to be healthy
         run: |
-          echo "Waiting for Airflow webserver..."
+          echo "⏳ Waiting 120s for Airflow to initialize..."
+          sleep 120
+
+          echo "🔍 Starting health check loop..."
           docker compose logs -f airflow-webserver &
           LOGS_PID=$!
           timeout=600
@@ -63,13 +57,14 @@ jobs:
           elapsed=0
           healthy=false
           while [ $elapsed -lt $timeout ]; do
-            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
+            STATUS=$(curl -s http://localhost:8080/health || true)
+            echo "Health response: $STATUS"
+            if echo "$STATUS" | grep -q '"status":"healthy"'; then
               echo "✅ Airflow webserver is healthy"
               healthy=true
               break
-            else
-              echo "⏳ Webserver not ready yet... (elapsed: $elapsed s)"
             fi
+            echo "⏳ Webserver not ready yet... (elapsed: $elapsed s)"
             sleep $interval
             elapsed=$((elapsed + interval))
           done
@@ -81,23 +76,32 @@ jobs:
           fi
 
       - name: Test GCS connection
-        run: gsutil ls gs://$GCS_BUCKET || exit 1
+        run: |
+          echo "Testing GCS connection..."
+          gsutil ls gs://$GCS_BUCKET || exit 1
 
       - name: Test S3 connection
-        run: aws s3 ls s3://$S3_BUCKET || exit 1
+        run: |
+          echo "Testing S3 connection..."
+          aws s3 ls s3://$S3_BUCKET || exit 1
 
       - name: Test BigQuery connection
-        run: bq query --use_legacy_sql=false "SELECT 1" || exit 1
+        run: |
+          echo "Testing BigQuery connection..."
+          bq query --use_legacy_sql=false "SELECT 1" || exit 1
 
       - name: Trigger DAG run
         run: |
+          echo "Triggering Airflow DAG run..."
           curl -X POST "http://localhost:8080/api/v1/dags/industry_metrics_full_dag/dagRuns" \
             -H "Content-Type: application/json" \
             --user "airflow:airflow" \
             -d '{"conf": {}}'
 
       - name: Wait for DAG to finish
-        run: sleep 60
+        run: |
+          echo "Waiting for DAG to finish..."
+          sleep 60
 
       - name: Run pytest
         run: pytest -v
