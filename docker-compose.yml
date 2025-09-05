@@ -97,9 +97,7 @@ services:
       - -c
       - |
         set -e
-        echo "🔹 Initializing Airflow DB..."
         airflow db init
-        echo "🔹 Creating admin user..."
         airflow users create \
           --username airflow \
           --password airflow \
@@ -107,9 +105,6 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
-        echo "🔹 Setting Airflow variables..."
-        airflow variables set gcs_bucket domoproject
-        airflow variables set bq_dataset sales_dataset
         echo "✅ Airflow init completed"
 
   airflow-cli:
