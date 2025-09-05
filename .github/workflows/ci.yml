@@ -80,7 +80,7 @@ jobs:
       - name: Wait for DAG completion (with debug)
         run: |
           echo "⏳ Monitoring DAG Run"
-          for i in {1..3}; do   # 3回チェック → 約1分で終了
+          for i in {1..3}; do   # 最大 1 分
             latest=$(docker compose run --rm airflow-cli \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest: $latest"
@@ -90,8 +90,14 @@ jobs:
               break
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
+              run_id=$(echo $latest | awk '{print $3}')
               docker compose run --rm airflow-cli \
-                airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
+                airflow tasks states-for-dag-run industry_metrics_full_dag $run_id
+              # 失敗したタスクのログを出力
+              for task in preprocess_retail preprocess_ads; do
+                docker compose run --rm airflow-cli \
+                  airflow tasks logs industry_metrics_full_dag $task $run_id || true
+              done
               exit 1
             fi
             sleep 20
