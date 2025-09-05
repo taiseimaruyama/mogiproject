@@ -110,7 +110,8 @@ services:
     image: apache/airflow:2.8.1
     env_file: .env
     depends_on:
-      - airflow-scheduler
+      airflow-init:
+        condition: service_completed_successfully
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
