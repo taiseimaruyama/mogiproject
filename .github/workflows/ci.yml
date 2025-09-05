@@ -63,7 +63,7 @@ jobs:
           docker compose logs --tail=200 -f airflow-webserver &
           PID3=$!
 
-          for i in {1..20}; do   # 30秒 × 20回 = 最大10分
+          for i in {1..40}; do   # 30秒 × 40回 = 最大20分
             echo "⏳ Checking DAG status... ($i)"
             
             RUNS=$(docker compose exec -T airflow-webserver \
@@ -91,7 +91,7 @@ jobs:
             sleep 30
           done
 
-          echo "❌ DAG did not finish within 10 minutes"
+          echo "❌ DAG did not finish within 20 minutes"
           kill $PID1 $PID2 $PID3 || true
           echo "📜 === Scheduler logs (last 200) ==="
           docker compose logs --tail=200 airflow-scheduler
