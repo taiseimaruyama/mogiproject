@@ -66,15 +66,19 @@ jobs:
               echo "✅ DAG loaded"
               break
             fi
-            echo "⏳ DAG not yet loaded... ($i)"
+            echo "⏳ DAG not loaded yet... ($i)"
             sleep 10
           done
 
       - name: Trigger DAG
         run: |
-          echo "🚀 Triggering DAG..."
+          echo "🚀 Triggering DAG industry_metrics_full_dag..."
           docker compose exec -T airflow-webserver \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+
+          echo "📋 List DAG runs (debug)"
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 20
 
       - name: Wait for DAG completion (30 min)
         run: |
