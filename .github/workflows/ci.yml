@@ -41,10 +41,10 @@ jobs:
           done
 
       - name: Check DAG import errors
-        run: docker compose exec -T airflow-webserver airflow dags list-import-errors || true
+        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
       - name: List DAGs
-        run: docker compose exec -T airflow-webserver airflow dags list
+        run: docker compose exec -T airflow-scheduler airflow dags list
 
       - name: Prepare dummy input data
         run: |
@@ -58,14 +58,14 @@ jobs:
           echo "5,50,100,25" >> input/ads.csv
 
       - name: Trigger DAG
-        run: docker compose exec -T airflow-webserver \
+        run: docker compose exec -T airflow-scheduler \
           airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
       - name: Wait for DAG completion (with debug)
         run: |
           echo "⏳ Monitoring DAG Run"
           for i in {1..90}; do
-            latest=$(docker compose exec -T airflow-webserver \
+            latest=$(docker compose exec -T airflow-scheduler \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest: $latest"
 
@@ -74,7 +74,7 @@ jobs:
               break
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
-              docker compose exec -T airflow-webserver \
+              docker compose exec -T airflow-scheduler \
                 airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
               exit 1
             fi
