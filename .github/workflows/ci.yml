@@ -29,11 +29,13 @@ jobs:
       - name: Debug docker-compose
         run: docker compose config
 
+      # === GCP 認証ファイルを配置 ===
       - name: Set up GCP credentials
         run: |
           mkdir -p keys
           echo '${{ secrets.GCP_CREDENTIALS }}' > keys/gcp.json
 
+      # Airflow DB初期化 & Adminユーザー作成
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-init
 
@@ -53,16 +55,20 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
+      # === DAG 実行 ===
       - name: Trigger DAG
         run: |
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
+          RUN_ID="ci_run_$(date +%s)"
+          echo "Triggering DAG with run_id=$RUN_ID"
+          docker compose exec -T airflow-webserver airflow dags trigger -r $RUN_ID industry_metrics_full_dag
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
 
       - name: Wait for DAG completion (30 min)
         run: |
           echo "Monitoring DAG Run (latest run)"
           for i in {1..90}; do
             latest=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | grep "$RUN_ID" | head -n 1)
             echo "Latest run: $latest"
 
             if echo "$latest" | grep "success"; then
@@ -80,6 +86,7 @@ jobs:
           echo "⏰ DAG did not finish in 30 minutes"
           exit 1
 
+      # === AWS 認証をセットアップ ===
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
