@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:13
+    user: "${AIRFLOW_UID:-50000}:0"
     environment:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
@@ -14,11 +15,14 @@ services:
 
   redis:
     image: redis:latest
+    user: "${AIRFLOW_UID:-50000}:0"
     ports:
       - "6379:6379"
 
   airflow-webserver:
     image: apache/airflow:2.8.1
+    restart: always
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -32,14 +36,14 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt
     ports:
       - "8080:8080"
-    command: >
-      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow webserver'"
+    command: webserver
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
+    restart: always
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -53,12 +57,12 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt
-    command: >
-      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow scheduler'"
+    command: scheduler
 
   airflow-worker:
     image: apache/airflow:2.8.1
+    restart: always
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -72,13 +76,11 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt
-    command: >
-      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow celery worker'"
+    command: celery worker
 
   airflow-init:
     image: apache/airflow:2.8.1
-    user: root
+    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
     environment:
@@ -91,11 +93,18 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt
-    command: >
-      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt &&
-        airflow db init &&
-        airflow users create --username airflow --password airflow --firstname admin --lastname user --role Admin --email admin@example.com'"
+    command:
+      - bash
+      - -c
+      - |
+        airflow db init && \
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname admin \
+          --lastname user \
+          --role Admin \
+          --email admin@example.com
 
 volumes:
   postgres-db-volume:
