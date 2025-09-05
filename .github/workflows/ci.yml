@@ -57,11 +57,11 @@ jobs:
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag --tree | grep "retail_" | awk '{print $1}' | sort -u)
+            bash -c "airflow tasks list industry_metrics_full_dag | grep 'retail_' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
           done
 
       # === Ads 系タスクを順番に実行 ===
@@ -69,33 +69,29 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag --tree | grep "ads_" | awk '{print $1}' | sort -u)
+            bash -c "airflow tasks list industry_metrics_full_dag | grep 'ads_' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
           done
 
-      # === GCS 接続テスト ===
       - name: Test GCS connection
         run: |
           echo "Testing GCS connection..."
           docker compose exec -T airflow-webserver gsutil ls gs://${{ secrets.GCS_BUCKET }} || true
 
-      # === S3 接続テスト ===
       - name: Test S3 connection
         run: |
           echo "Testing S3 connection..."
           aws s3 ls s3://domoproject || true
 
-      # === BigQuery 接続テスト ===
       - name: Test BigQuery connection
         run: |
           echo "Testing BigQuery connection..."
           docker compose exec -T airflow-webserver \
             bq query --use_legacy_sql=false "SELECT 1" || true
 
-      # === AWS 認証設定 ===
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -103,7 +99,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-northeast-1
 
-      # === 出力ファイルを S3 にアップロード ===
       - name: Upload output files to S3
         if: always()
         run: |
