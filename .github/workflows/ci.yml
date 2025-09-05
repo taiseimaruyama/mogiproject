@@ -47,13 +47,31 @@ jobs:
           kill $LOG_PID
           exit 1
 
-      - name: Trigger Airflow DAG
+      - name: Trigger Airflow DAG and wait for completion
         run: |
           echo "🚀 Triggering DAG industry_metrics_full_dag"
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
-          echo "⏳ Waiting for DAG tasks to run..."
-          sleep 60
-          echo "✅ DAG trigger step finished"
+          RUN_ID="ci_run_$(date +%s)"
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger -r $RUN_ID industry_metrics_full_dag
+
+          echo "⏳ Polling DAG state (max 5 minutes, every 30s)..."
+          for i in {1..10}; do
+            STATUS=$(docker compose exec -T airflow-webserver \
+              airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d))
+            echo "[$i] DAG state: $STATUS"
+
+            if [[ "$STATUS" == "success" ]]; then
+              echo "✅ DAG finished successfully"
+              exit 0
+            elif [[ "$STATUS" == "failed" ]]; then
+              echo "❌ DAG failed"
+              exit 1
+            fi
+            sleep 30
+          done
+
+          echo "❌ DAG did not finish within 5 minutes"
+          exit 1
 
       - name: Test GCS connection
         run: |
