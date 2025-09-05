@@ -21,7 +21,7 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.8.1
-    user: root   # ✅ root 権限で起動してパッケージ追加できるようにする
+    user: root
     depends_on:
       - postgres
       - redis
@@ -37,7 +37,11 @@ services:
       - ./output:/opt/airflow/output
     ports:
       - "8080:8080"
-    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow webserver'"
+    command: >
+      bash -c "apt-get update &&
+               apt-get install -y jq &&
+               chown -R airflow: /opt/airflow &&
+               su airflow -c 'airflow webserver'"
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
@@ -55,7 +59,11 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow scheduler'"
+    command: >
+      bash -c "apt-get update &&
+               apt-get install -y jq &&
+               chown -R airflow: /opt/airflow &&
+               su airflow -c 'airflow scheduler'"
 
   airflow-worker:
     image: apache/airflow:2.8.1
@@ -73,7 +81,11 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow celery worker'"
+    command: >
+      bash -c "apt-get update &&
+               apt-get install -y jq &&
+               chown -R airflow: /opt/airflow &&
+               su airflow -c 'airflow celery worker'"
 
   airflow-init:
     image: apache/airflow:2.8.1
@@ -91,18 +103,12 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        apt-get update && apt-get install -y jq
-        airflow db init
-        airflow users create \
-          --username airflow \
-          --password airflow \
-          --firstname admin \
-          --lastname user \
-          --role Admin \
-          --email admin@example.com
+    command: >
+      -c "apt-get update &&
+          apt-get install -y jq &&
+          airflow db init &&
+          airflow users create --username airflow --password airflow \
+            --firstname admin --lastname user --role Admin --email admin@example.com"
 
 volumes:
   postgres-db-volume:
