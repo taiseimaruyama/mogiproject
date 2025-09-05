@@ -24,10 +24,14 @@ services:
     depends_on:
       - postgres
       - redis
+      - airflow-scheduler
+      - airflow-worker
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
@@ -42,23 +46,44 @@ services:
       - postgres
       - redis
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     command: scheduler
 
+  airflow-worker:
+    image: apache/airflow:2.8.1
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    command: celery worker
+
   airflow-init:
     image: apache/airflow:2.8.1
     depends_on:
       - postgres
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
