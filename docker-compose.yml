@@ -28,6 +28,10 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+    volumes:
+      - ./dags:/opt/airflow/dags        # ✅ DAG ファイル共有
+      - ./input:/opt/airflow/input      # ✅ 入力ファイル共有
+      - ./output:/opt/airflow/output    # ✅ 出力ファイル共有
     ports:
       - "8080:8080"
     command: webserver
@@ -41,6 +45,10 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+    volumes:
+      - ./dags:/opt/airflow/dags        # ✅ DAG ファイル共有
+      - ./input:/opt/airflow/input      # ✅ 入力ファイル共有
+      - ./output:/opt/airflow/output    # ✅ 出力ファイル共有
     command: scheduler
 
   airflow-init:
@@ -51,6 +59,10 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+    volumes:
+      - ./dags:/opt/airflow/dags        # ✅ DAG ファイル共有
+      - ./input:/opt/airflow/input      # ✅ 入力ファイル共有
+      - ./output:/opt/airflow/output    # ✅ 出力ファイル共有
     entrypoint: /bin/bash
     command:
       - -c
