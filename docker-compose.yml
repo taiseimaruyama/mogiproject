@@ -1,3 +1,5 @@
+version: "3"
+
 services:
   postgres:
     image: postgres:13
@@ -19,6 +21,7 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.8.1
+    user: root   # ✅ root 権限で起動してパッケージ追加できるようにする
     depends_on:
       - postgres
       - redis
@@ -28,19 +31,17 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      # GCP 認証追加
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./keys:/opt/airflow/keys   # 追加
     ports:
       - "8080:8080"
-    command: webserver
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow webserver'"
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
+    user: root
     depends_on:
       - postgres
       - redis
@@ -50,16 +51,15 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./keys:/opt/airflow/keys   # 追加
-    command: scheduler
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow scheduler'"
 
   airflow-worker:
     image: apache/airflow:2.8.1
+    user: root
     depends_on:
       - postgres
       - redis
@@ -69,16 +69,15 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./keys:/opt/airflow/keys   # 追加
-    command: celery worker
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow celery worker'"
 
   airflow-init:
     image: apache/airflow:2.8.1
+    user: root
     depends_on:
       - postgres
     environment:
@@ -87,16 +86,15 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/keys/gcp.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./keys:/opt/airflow/keys   # 追加
     entrypoint: /bin/bash
     command:
       - -c
       - |
+        apt-get update && apt-get install -y jq
         airflow db init
         airflow users create \
           --username airflow \
