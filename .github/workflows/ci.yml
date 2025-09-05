@@ -1,4 +1,4 @@
-name: Airflow CI
+name: CI
 
 on:
   push:
@@ -7,22 +7,25 @@ on:
   pull_request:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+
+    services:
+      docker:
+        image: docker:20.10.16-dind
+        options: --privileged
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v2
-
-      - name: Debug docker-compose
-        run: docker compose version
+      - name: Set up Docker Compose
+        run: |
+          docker compose version
+          docker compose -f docker-compose.yml config
 
       - name: Initialize Airflow DB
-        run: |
-          echo "🚀 Initializing Airflow metadata database..."
-          docker compose run --rm airflow-init
+        run: docker compose run --rm airflow-init
 
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
@@ -34,31 +37,31 @@ jobs:
         run: |
           echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
           for i in {1..30}; do
-            ok_web=$(docker compose exec -T airflow-webserver airflow jobs check --job-type SchedulerJob || true)
-            ok_sched=$(docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob || true)
-            ok_work=$(docker compose logs airflow-worker | tail -n 20 || true)
+            web=$(docker compose exec -T airflow-webserver airflow jobs check --job-type SchedulerJob || true)
+            sched=$(docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob || true)
+            work=$(docker compose ps -a | grep airflow-worker | grep Up || true)
 
-            if echo "$ok_sched" | grep -q "running"; then
-              echo "✅ Scheduler running"
-            fi
-            if echo "$ok_web" | grep -q "running"; then
-              echo "✅ Webserver running"
-            fi
-            if echo "$ok_work" | grep -q "ready"; then
-              echo "✅ Worker running"
+            if echo "$web" | grep -q "healthy" && \
+               echo "$sched" | grep -q "healthy" && \
+               [ -n "$work" ]; then
+              echo "✅ All components are ready"
               exit 0
             fi
 
             echo "⏳ Still waiting... ($i)"
+            echo "---- airflow-worker logs (last 20 lines) ----"
+            docker compose logs --tail=20 airflow-worker || true
+            echo "---- airflow-scheduler logs (last 20 lines) ----"
+            docker compose logs --tail=20 airflow-scheduler || true
             sleep 10
           done
-          echo "❌ Airflow components not ready after timeout"
+          echo "❌ Airflow components not ready in time"
           exit 1
 
       - name: Trigger DAG
         run: |
           docker compose exec -T airflow-webserver \
-            airflow dags trigger -r ci_run_${{ github.run_id }} industry_metrics_full_dag
+            airflow dags trigger -d industry_metrics_full_dag ci_run_$(date +%s)
 
       - name: Wait for DAG completion (30 min)
         run: |
@@ -67,6 +70,7 @@ jobs:
             latest=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest run: $latest"
+
             if echo "$latest" | grep -q "success"; then
               echo "✅ DAG finished successfully"
               exit 0
@@ -74,11 +78,33 @@ jobs:
               echo "❌ DAG failed"
               exit 1
             fi
+
             sleep 20
           done
           echo "❌ DAG did not finish in 30 minutes"
           exit 1
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+
+      - name: Test GCS connection
+        run: gsutil ls gs://dummy-bucket || true
+
+      - name: Test S3 connection
+        run: aws s3 ls s3://domoproject || true
+
+      - name: Test BigQuery connection
+        run: bq ls || true
+
+      - name: Upload output files to S3
+        run: |
+          echo "📤 Uploading files in ./output to S3..."
+          aws s3 cp ./output s3://domoproject/ --recursive || true
+
       - name: Stop containers
         if: always()
-        run: docker compose down -v
+        run: docker compose down
