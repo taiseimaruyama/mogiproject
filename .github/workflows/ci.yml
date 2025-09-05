@@ -25,6 +25,8 @@ jobs:
           sudo apt-get install -y docker-compose
 
       - name: Start Airflow with Docker Compose
+        env:
+          AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
         run: |
           docker compose up -d
 
@@ -48,6 +50,8 @@ jobs:
           exit 1
 
       - name: Trigger Airflow DAG (with live logs)
+        env:
+          AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
         run: |
           echo "🚀 Triggering DAG industry_metrics_full_dag"
           docker compose exec -T airflow-webserver \
