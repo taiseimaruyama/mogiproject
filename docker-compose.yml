@@ -114,7 +114,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    command: bash
+    # command 削除 → airflow を直接呼べるようにする
 
 volumes:
   postgres-db-volume:
