@@ -69,6 +69,9 @@ jobs:
           echo "10,100,200,50" >> input/ads.csv
           echo "5,50,100,25" >> input/ads.csv
 
+      - name: Unpause DAG
+        run: docker compose run --rm airflow-cli airflow dags unpause industry_metrics_full_dag
+
       - name: Trigger DAG
         run: |
           docker compose run --rm airflow-cli \
@@ -100,6 +103,10 @@ jobs:
       - name: Show airflow-init logs (always)
         if: always()
         run: docker compose logs airflow-init
+
+      - name: Show scheduler logs (always)
+        if: always()
+        run: docker compose logs airflow-scheduler
 
       - name: Show worker logs (always)
         if: always()
