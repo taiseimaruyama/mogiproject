@@ -96,15 +96,20 @@ services:
       - bash
       - -c
       - |
-        airflow db init && \
+        set -e
+        echo "🔹 Initializing Airflow DB..."
+        airflow db init
+        echo "🔹 Creating admin user..."
         airflow users create \
           --username airflow \
           --password airflow \
           --firstname admin \
           --lastname user \
           --role Admin \
-          --email admin@example.com && \
+          --email admin@example.com
+        echo "🔹 Setting Airflow variables..."
         airflow variables set gcs_bucket domoproject
+        echo "✅ Airflow init completed"
 
   airflow-cli:
     image: apache/airflow:2.8.1
