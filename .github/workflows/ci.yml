@@ -1,103 +1,95 @@
-name: CI for Airflow DAG
+name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: airflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U airflow"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     env:
       AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      AIRFLOW_UID: 50000
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Initialize Airflow DB + User + Variables
-        run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
+      - name: Set up Docker Compose
+        run: docker compose version
 
-      - name: Start Airflow
-        run: docker compose up -d
-
-      - name: Wait for Airflow components
+      - name: Build and start services
         run: |
-          echo "⏳ Waiting for Airflow..."
-          for i in {1..30}; do
-            ok=true
-            for svc in airflow-webserver airflow-scheduler airflow-worker; do
-              if ! docker compose ps $svc | grep "Up"; then
-                ok=false
-              fi
-            done
-            [ "$ok" = true ] && echo "✅ Airflow is running" && break
-            sleep 10
-          done
+          docker compose up -d --build
+          # 方法A: 起動待機（sleep 20）
+          sleep 20
+          # 方法B: DBチェック（1回だけ）
+          docker compose run --rm airflow-cli airflow db check
 
-      - name: Check DAG import errors
-        run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
+      - name: Run Airflow init
+        run: docker compose run --rm airflow-init
 
-      - name: List DAGs
-        run: docker compose run --rm airflow-cli airflow dags list
+      - name: Show airflow-init logs
+        run: docker compose logs airflow-init
 
-      - name: Prepare dummy input data
+      - name: Run scheduler
+        run: docker compose up -d airflow-scheduler
+
+      - name: Run worker
+        run: docker compose up -d airflow-worker
+
+      - name: Run webserver
+        run: docker compose up -d airflow-webserver
+
+      - name: Show scheduler logs
+        run: docker compose logs airflow-scheduler
+
+      - name: Show worker logs
+        run: docker compose logs airflow-worker
+
+      # 👇 ここを追加：タスクの詳細ログを掘りに行く
+      - name: Show task logs (preprocess_retail)
         run: |
-          mkdir -p input
-          echo "date,sales,stock" > input/retail.csv
-          echo "2025-01-01,100,50" >> input/retail.csv
-          echo "2025-01-02,80,0" >> input/retail.csv
+          docker compose run --rm airflow-cli \
+            airflow tasks logs industry_metrics_full_dag preprocess_retail ci_run_17490581132 || true
 
-          echo "clicks,impressions,revenue,spend" > input/ads.csv
-          echo "10,100,200,50" >> input/ads.csv
-          echo "5,50,100,25" >> input/ads.csv
+      - name: Show task logs (preprocess_ads)
+        run: |
+          docker compose run --rm airflow-cli \
+            airflow tasks logs industry_metrics_full_dag preprocess_ads ci_run_17490581132 || true
 
-      - name: Unpause DAG
-        run: docker compose run --rm airflow-cli airflow dags unpause industry_metrics_full_dag
-
+      # DAG 全体を1回テスト実行
       - name: Trigger DAG
         run: |
           docker compose run --rm airflow-cli \
-            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
-
-      - name: Wait for DAG completion (single check)
-        run: |
-          echo "⏳ Checking DAG Run (single attempt)"
-          latest=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
-          echo "Latest: $latest"
-
-          if echo "$latest" | grep "success"; then
-            echo "✅ DAG finished successfully"
-          elif echo "$latest" | grep "failed"; then
-            echo "❌ DAG failed"
-            docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
-            exit 1
-          else
-            echo "⚠️ DAG is still running or not started yet"
-          fi
-
-      - name: Upload output files to S3
-        run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
-
-      - name: Show airflow-init logs (always)
-        if: always()
-        run: docker compose logs airflow-init
-
-      - name: Show scheduler logs (always)
-        if: always()
-        run: docker compose logs airflow-scheduler
-
-      - name: Show worker logs (always)
-        if: always()
-        run: docker compose logs airflow-worker
-
-      - name: Stop containers
-        if: always()
-        run: docker compose down -v
+            airflow dags test industry_metrics_full_dag 2025-09-05
