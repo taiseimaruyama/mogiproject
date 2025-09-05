@@ -1,4 +1,4 @@
-version: "3"
+version: "3.8"
 
 services:
   postgres:
@@ -21,7 +21,6 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.8.1
-    user: root
     depends_on:
       - postgres
       - redis
@@ -37,15 +36,10 @@ services:
       - ./output:/opt/airflow/output
     ports:
       - "8080:8080"
-    command: >
-      bash -c "apt-get update &&
-               apt-get install -y jq &&
-               chown -R airflow: /opt/airflow &&
-               exec su airflow -c 'airflow webserver'"
+    command: webserver
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
-    user: root
     depends_on:
       - postgres
       - redis
@@ -59,15 +53,10 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    command: >
-      bash -c "apt-get update &&
-               apt-get install -y jq &&
-               chown -R airflow: /opt/airflow &&
-               exec su airflow -c 'airflow scheduler'"
+    command: scheduler
 
   airflow-worker:
     image: apache/airflow:2.8.1
-    user: root
     depends_on:
       - postgres
       - redis
@@ -81,11 +70,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    command: >
-      bash -c "apt-get update &&
-               apt-get install -y jq &&
-               chown -R airflow: /opt/airflow &&
-               exec su airflow -c 'airflow celery worker'"
+    command: celery worker
 
   airflow-init:
     image: apache/airflow:2.8.1
@@ -104,16 +89,9 @@ services:
       - ./output:/opt/airflow/output
     entrypoint: /bin/bash
     command: >
-      -c "apt-get update &&
-          apt-get install -y jq &&
-          airflow db init &&
-          airflow users create \
-            --username airflow \
-            --password airflow \
-            --firstname admin \
-            --lastname user \
-            --role Admin \
-            --email admin@example.com"
+      -c "airflow db init &&
+          airflow users create --username airflow --password airflow \
+          --firstname admin --lastname user --role Admin --email admin@example.com"
 
 volumes:
   postgres-db-volume:
