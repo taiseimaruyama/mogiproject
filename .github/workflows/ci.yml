@@ -60,14 +60,25 @@ jobs:
       - name: Wait for DAG to be loaded
         run: |
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          for i in {1..20}; do
-            if docker compose exec -T airflow-webserver airflow dags list | grep "industry_metrics_full_dag"; then
+          for i in {1..15}; do
+            if docker compose exec -T airflow-webserver \
+              airflow dags list | grep industry_metrics_full_dag; then
               echo "✅ DAG loaded"
               break
             fi
-            echo "⏳ Still waiting DAG load... ($i)"
+            echo "⏳ Still waiting for DAG... ($i)"
             sleep 10
           done
+
+      # 追加: DAG import エラー確認
+      - name: Debug DAG import errors
+        run: docker compose exec -T airflow-webserver \
+          airflow dags list-import-errors || true
+
+      # 追加: DAGに登録されているタスク確認
+      - name: Debug DAG tasks
+        run: docker compose exec -T airflow-webserver \
+          airflow tasks list industry_metrics_full_dag || true
 
       - name: Trigger DAG
         run: |
@@ -76,9 +87,8 @@ jobs:
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
       - name: List DAG runs (debug)
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10
+        run: docker compose exec -T airflow-webserver \
+          airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10
 
       - name: Wait for DAG completion (30 min)
         run: |
@@ -92,8 +102,6 @@ jobs:
               exit 0
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
-              docker compose logs --tail 50 airflow-worker || true
-              docker compose logs --tail 50 airflow-scheduler || true
               exit 1
             fi
             echo "⏳ Still running... ($i)"
@@ -102,8 +110,6 @@ jobs:
             sleep 20
           done
           echo "⏳ DAG did not finish in 30 minutes"
-          docker compose logs --tail 100 airflow-worker || true
-          docker compose logs --tail 100 airflow-scheduler || true
           exit 1
 
       - name: Configure AWS credentials
