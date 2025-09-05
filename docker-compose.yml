@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:13
-    user: "${AIRFLOW_UID:-50000}:0"
     environment:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
@@ -12,17 +11,18 @@ services:
       test: ["CMD-SHELL", "pg_isready -U airflow"]
       interval: 5s
       retries: 5
+    networks:
+      - airflow-net
 
   redis:
     image: redis:latest
-    user: "${AIRFLOW_UID:-50000}:0"
     ports:
       - "6379:6379"
+    networks:
+      - airflow-net
 
   airflow-webserver:
     image: apache/airflow:2.8.1
-    restart: always
-    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -39,11 +39,11 @@ services:
     ports:
       - "8080:8080"
     command: webserver
+    networks:
+      - airflow-net
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
-    restart: always
-    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -58,11 +58,11 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     command: scheduler
+    networks:
+      - airflow-net
 
   airflow-worker:
     image: apache/airflow:2.8.1
-    restart: always
-    user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       - postgres
       - redis
@@ -77,10 +77,12 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     command: celery worker
+    networks:
+      - airflow-net
 
   airflow-init:
     image: apache/airflow:2.8.1
-    user: "${AIRFLOW_UID:-50000}:0"
+    user: root
     depends_on:
       - postgres
     environment:
@@ -105,6 +107,11 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
+    networks:
+      - airflow-net
 
 volumes:
   postgres-db-volume:
+
+networks:
+  airflow-net:
