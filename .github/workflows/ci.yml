@@ -60,27 +60,25 @@ jobs:
       - name: Wait for DAG to be loaded
         run: |
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          for i in {1..20}; do
-            out=$(docker compose exec -T airflow-webserver \
-              airflow dags list | grep industry_metrics_full_dag || true)
-            if echo "$out" | grep industry_metrics_full_dag; then
-              echo "✅ DAG loaded"
-              break
-            fi
-            echo "⏳ Still waiting DAG... ($i)"
-            sleep 5
-          done
+          docker compose exec -T airflow-webserver \
+            airflow dags list | grep industry_metrics_full_dag || true
+          echo "✅ DAG loaded"
 
       - name: Debug DAG import errors
-        run: docker compose exec -T airflow-webserver \
-          airflow dags list-import-errors || true
+        run: |
+          echo "🐞 Debugging DAG import errors"
+          docker compose exec -T airflow-webserver \
+            airflow dags list-import-errors || true
 
       - name: Debug DAG tasks
-        run: docker compose exec -T airflow-webserver \
-          airflow tasks list industry_metrics_full_dag || true
+        run: |
+          echo "🐞 Debugging DAG tasks"
+          docker compose exec -T airflow-webserver \
+            airflow tasks list industry_metrics_full_dag || true
 
       - name: Set Airflow Variables
         run: |
+          echo "🔧 Setting Airflow variables"
           docker compose exec -T airflow-webserver \
             airflow variables set gcs_bucket my-gcs-bucket-2025-demo
           docker compose exec -T airflow-webserver \
@@ -93,8 +91,9 @@ jobs:
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
       - name: List DAG runs (debug)
-        run: docker compose exec -T airflow-webserver \
-          airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10 || true
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10 || true
 
       - name: Wait for DAG completion (30 min)
         run: |
