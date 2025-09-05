@@ -105,7 +105,13 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
-        echo "✅ Airflow init completed"
+
+        # Variables を初期化
+        airflow variables set gcs_bucket ${GCS_BUCKET}
+        airflow variables set bq_dataset ${BQ_DATASET}
+        airflow variables set s3_bucket ${S3_BUCKET}
+
+        echo "✅ Airflow init + Variables completed"
 
   airflow-cli:
     image: apache/airflow:2.8.1
