@@ -41,7 +41,7 @@ services:
       bash -c "apt-get update &&
                apt-get install -y jq &&
                chown -R airflow: /opt/airflow &&
-               su airflow -c 'airflow webserver'"
+               exec su airflow -c 'airflow webserver'"
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
@@ -63,7 +63,7 @@ services:
       bash -c "apt-get update &&
                apt-get install -y jq &&
                chown -R airflow: /opt/airflow &&
-               su airflow -c 'airflow scheduler'"
+               exec su airflow -c 'airflow scheduler'"
 
   airflow-worker:
     image: apache/airflow:2.8.1
@@ -85,7 +85,7 @@ services:
       bash -c "apt-get update &&
                apt-get install -y jq &&
                chown -R airflow: /opt/airflow &&
-               su airflow -c 'airflow celery worker'"
+               exec su airflow -c 'airflow celery worker'"
 
   airflow-init:
     image: apache/airflow:2.8.1
@@ -107,8 +107,13 @@ services:
       -c "apt-get update &&
           apt-get install -y jq &&
           airflow db init &&
-          airflow users create --username airflow --password airflow \
-            --firstname admin --lastname user --role Admin --email admin@example.com"
+          airflow users create \
+            --username airflow \
+            --password airflow \
+            --firstname admin \
+            --lastname user \
+            --role Admin \
+            --email admin@example.com"
 
 volumes:
   postgres-db-volume:
