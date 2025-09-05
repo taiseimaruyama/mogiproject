@@ -50,11 +50,8 @@ jobs:
       - name: Trigger Airflow DAG (with live logs)
         run: |
           echo "🚀 Triggering DAG industry_metrics_full_dag"
-          RUN_ID="ci_run_$(date +%s)"
-          EXEC_DATE=$(date +%Y-%m-%dT%H:%M:%S)
-
           docker compose exec -T airflow-webserver \
-            airflow dags trigger -r $RUN_ID industry_metrics_full_dag
+            airflow dags trigger industry_metrics_full_dag
 
           echo "📡 Streaming Airflow logs in real-time..."
           docker compose logs --follow airflow-scheduler &
@@ -63,19 +60,23 @@ jobs:
           PID2=$!
 
           for i in {1..10}; do   # 30秒間隔 × 10回 = 最大5分
-            STATUS=$(docker compose exec -T airflow-webserver \
-              airflow dags state industry_metrics_full_dag $EXEC_DATE -r $RUN_ID || echo "unknown")
-            echo "[$i] DAG state: $STATUS"
-
-            if [[ "$STATUS" == *"success"* ]]; then
+            RUNS=$(docker compose exec -T airflow-webserver \
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state success | tail -n +3 | wc -l)
+            if [ "$RUNS" -gt 0 ]; then
               echo "✅ DAG finished successfully"
               kill $PID1 $PID2 || true
               exit 0
-            elif [[ "$STATUS" == *"failed"* ]]; then
+            fi
+
+            FAILS=$(docker compose exec -T airflow-webserver \
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state failed | tail -n +3 | wc -l)
+            if [ "$FAILS" -gt 0 ]; then
               echo "❌ DAG failed"
               kill $PID1 $PID2 || true
               exit 1
             fi
+
+            echo "⏳ DAG still running... ($i)"
             sleep 30
           done
 
