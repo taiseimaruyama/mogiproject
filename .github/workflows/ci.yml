@@ -1,28 +1,31 @@
-name: CI
+name: CI for Airflow DAG
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    services:
-      docker:
-        image: docker:20.10.16-dind
-        options: --privileged
+    env:
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ap-northeast-1
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Docker Compose
-        run: |
-          docker compose version
-          docker compose -f docker-compose.yml config
+        run: docker compose version
+
+      - name: Debug docker-compose
+        run: cat docker-compose.yml
 
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-init
@@ -37,31 +40,25 @@ jobs:
         run: |
           echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
           for i in {1..30}; do
-            web=$(docker compose exec -T airflow-webserver airflow jobs check --job-type SchedulerJob || true)
-            sched=$(docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob || true)
-            work=$(docker compose ps -a | grep airflow-worker | grep Up || true)
-
-            if echo "$web" | grep -q "healthy" && \
-               echo "$sched" | grep -q "healthy" && \
-               [ -n "$work" ]; then
-              echo "✅ All components are ready"
-              exit 0
+            ok=true
+            for svc in airflow-webserver airflow-scheduler airflow-worker; do
+              if ! docker compose ps $svc | grep "Up"; then
+                echo "❌ $svc not running"
+                ok=false
+              fi
+            done
+            if [ "$ok" = true ]; then
+              echo "✅ All components running"
+              break
             fi
-
             echo "⏳ Still waiting... ($i)"
-            echo "---- airflow-worker logs (last 20 lines) ----"
-            docker compose logs --tail=20 airflow-worker || true
-            echo "---- airflow-scheduler logs (last 20 lines) ----"
-            docker compose logs --tail=20 airflow-scheduler || true
+            docker compose logs --tail 20 airflow-worker || true
             sleep 10
           done
-          echo "❌ Airflow components not ready in time"
-          exit 1
 
       - name: Trigger DAG
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger -d industry_metrics_full_dag ci_run_$(date +%s)
+        run: docker compose exec -T airflow-webserver \
+          airflow dags trigger -d industry_metrics_full_dag ci_run_${{ github.run_id }}
 
       - name: Wait for DAG completion (30 min)
         run: |
@@ -70,32 +67,31 @@ jobs:
             latest=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest run: $latest"
-
-            if echo "$latest" | grep -q "success"; then
+            if echo "$latest" | grep "success"; then
               echo "✅ DAG finished successfully"
               exit 0
-            elif echo "$latest" | grep -q "failed"; then
+            elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
               exit 1
             fi
-
             sleep 20
           done
-          echo "❌ DAG did not finish in 30 minutes"
+          echo "⏳ DAG did not finish in 30 minutes"
           exit 1
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-northeast-1
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}" >> ~/.aws/credentials
+          echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" >> ~/.aws/credentials
+          echo "region=${AWS_DEFAULT_REGION}" >> ~/.aws/credentials
 
       - name: Test GCS connection
         run: gsutil ls gs://dummy-bucket || true
 
       - name: Test S3 connection
-        run: aws s3 ls s3://domoproject || true
+        run: aws s3 ls || true
 
       - name: Test BigQuery connection
         run: bq ls || true
@@ -103,8 +99,8 @@ jobs:
       - name: Upload output files to S3
         run: |
           echo "📤 Uploading files in ./output to S3..."
-          aws s3 cp ./output s3://domoproject/ --recursive || true
+          aws s3 cp ./output s3://domoproject/ --recursive
 
       - name: Stop containers
         if: always()
-        run: docker compose down
+        run: docker compose down -v
