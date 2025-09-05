@@ -1,116 +1,108 @@
-name: CI
+version: "3"
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      retries: 5
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
 
-    services:
-      docker:
-        image: docker:20.10-dind
-        options: --privileged
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    user: root   # ✅ root 権限で起動してパッケージ追加できるようにする
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    ports:
+      - "8080:8080"
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow webserver'"
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+  airflow-scheduler:
+    image: apache/airflow:2.8.1
+    user: root
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow scheduler'"
 
-      - name: Set up Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
+  airflow-worker:
+    image: apache/airflow:2.8.1
+    user: root
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    command: bash -c "apt-get update && apt-get install -y jq && chown -R airflow: /opt/airflow && su airflow -c 'airflow celery worker'"
 
-      # === GCP 認証ファイルを配置 ===
-      - name: Set up GCP credentials
-        run: |
-          mkdir -p keys
-          echo '${{ secrets.GCP_CREDENTIALS }}' > keys/gcp.json
+  airflow-init:
+    image: apache/airflow:2.8.1
+    user: root
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        apt-get update && apt-get install -y jq
+        airflow db init
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname admin \
+          --lastname user \
+          --role Admin \
+          --email admin@example.com
 
-      # Airflow のDB初期化 & Adminユーザー作成
-      - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-init
-
-      - name: Start Airflow with Docker Compose
-        run: docker compose up -d
-
-      - name: Wait for Airflow webserver to be healthy
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health; then
-              echo "✅ Airflow is healthy"
-              exit 0
-            fi
-            echo "⏳ Still waiting... ($i)"
-            sleep 5
-          done
-          echo "❌ Airflow did not become healthy in time"
-          exit 1
-
-      # === jq を airflow-webserver コンテナにインストール ===
-      - name: Install jq inside airflow-webserver
-        run: |
-          docker compose exec -T airflow-webserver bash -c "apt-get update && apt-get install -y jq"
-
-      # === Retail 系タスクを順番に実行 ===
-      - name: Run Retail tasks sequentially
-        run: |
-          echo "🚀 Running Retail tasks..."
-          TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id' | grep '^preprocess_retail\|^calc_retail_metrics\|^upload_retail\|^load_retail'")
-          for task in $TASKS; do
-            echo "🔎 Executing $task ..."
-            docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
-          done
-
-      # === Ads 系タスクを順番に実行 ===
-      - name: Run Ads tasks sequentially
-        run: |
-          echo "🚀 Running Ads tasks..."
-          TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id' | grep '^preprocess_ads\|^calc_ads_metrics\|^upload_ads'")
-          for task in $TASKS; do
-            echo "🔎 Executing $task ..."
-            docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
-          done
-
-      - name: Test GCS connection
-        run: |
-          echo "Testing GCS connection..."
-          docker compose exec -T airflow-webserver gsutil ls gs://${{ secrets.GCS_BUCKET }} || true
-
-      - name: Test S3 connection
-        run: |
-          echo "Testing S3 connection..."
-          aws s3 ls s3://domoproject || true
-
-      - name: Test BigQuery connection
-        run: |
-          echo "Testing BigQuery connection..."
-          docker compose exec -T airflow-webserver \
-            bq query --use_legacy_sql=false "SELECT 1" || true
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-northeast-1
-
-      - name: Upload output files to S3
-        if: always()
-        run: |
-          echo "📤 Uploading files in ./output to S3..."
-          ls -R output || echo "⚠️ output directory not found"
-          if [ -d output ]; then
-            aws s3 cp output/ s3://domoproject/ --recursive
-          else
-            echo "⚠️ No output directory found"
-          fi
+volumes:
+  postgres-db-volume:
