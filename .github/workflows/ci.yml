@@ -80,7 +80,7 @@ jobs:
       - name: Wait for DAG completion (with debug)
         run: |
           echo "⏳ Monitoring DAG Run"
-          for i in {1..90}; do
+          for i in {1..3}; do   # 3回チェック → 約1分で終了
             latest=$(docker compose run --rm airflow-cli \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest: $latest"
