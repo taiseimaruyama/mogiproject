@@ -52,7 +52,6 @@ jobs:
               break
             fi
             echo "⏳ Still waiting... ($i)"
-            docker compose logs --tail 20 airflow-scheduler || true
             docker compose logs --tail 20 airflow-worker || true
             sleep 10
           done
@@ -60,29 +59,32 @@ jobs:
       - name: Wait for DAG to be loaded
         run: |
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          docker compose exec -T airflow-webserver \
-            airflow dags list | grep industry_metrics_full_dag || true
-          echo "✅ DAG loaded"
-
-      - name: Debug DAG import errors
-        run: |
-          echo "🐞 Debugging DAG import errors"
-          docker compose exec -T airflow-webserver \
-            airflow dags list-import-errors || true
-
-      - name: Debug DAG tasks
-        run: |
-          echo "🐞 Debugging DAG tasks"
-          docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag || true
+          for i in {1..20}; do
+            if docker compose exec -T airflow-webserver airflow dags list | grep "industry_metrics_full_dag"; then
+              echo "✅ DAG loaded"
+              exit 0
+            fi
+            echo "⏳ DAG not loaded yet ($i)"
+            sleep 10
+          done
+          echo "❌ DAG not loaded"
+          exit 1
 
       - name: Set Airflow Variables
         run: |
-          echo "🔧 Setting Airflow variables"
-          docker compose exec -T airflow-webserver \
-            airflow variables set gcs_bucket my-gcs-bucket-2025-demo
-          docker compose exec -T airflow-webserver \
-            airflow variables set s3_bucket domoproject
+          docker compose exec -T airflow-webserver airflow variables set gcs_bucket my-gcs-bucket-2025-demo
+          docker compose exec -T airflow-webserver airflow variables set s3_bucket domoproject
+
+      - name: Prepare input data
+        run: |
+          mkdir -p input
+          echo "date,sales,stock" > input/retail.csv
+          echo "2025-01-01,100,50" >> input/retail.csv
+          echo "2025-01-02,80,0" >> input/retail.csv
+
+          echo "clicks,impressions,revenue,spend" > input/ads.csv
+          echo "10,100,200,50" >> input/ads.csv
+          echo "5,50,100,25" >> input/ads.csv
 
       - name: Trigger DAG
         run: |
@@ -123,7 +125,7 @@ jobs:
           echo "region=${AWS_DEFAULT_REGION}" >> ~/.aws/credentials
 
       - name: Test GCS connection
-        run: gsutil ls gs://dummy-bucket || true
+        run: gsutil ls gs://my-gcs-bucket-2025-demo || true
 
       - name: Test S3 connection
         run: aws s3 ls || true
