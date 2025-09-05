@@ -32,10 +32,11 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt   # ← 追加
+      - ./requirements.txt:/requirements.txt
     ports:
       - "8080:8080"
-    command: bash -c "pip install --no-cache-dir -r /requirements.txt && airflow webserver"
+    command: >
+      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow webserver'"
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
@@ -52,8 +53,9 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt   # ← 追加
-    command: bash -c "pip install --no-cache-dir -r /requirements.txt && airflow scheduler"
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow scheduler'"
 
   airflow-worker:
     image: apache/airflow:2.8.1
@@ -70,8 +72,9 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt   # ← 追加
-    command: bash -c "pip install --no-cache-dir -r /requirements.txt && airflow celery worker"
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt && airflow celery worker'"
 
   airflow-init:
     image: apache/airflow:2.8.1
@@ -88,16 +91,11 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-      - ./requirements.txt:/requirements.txt   # ← 追加
-    command: bash -c "pip install --no-cache-dir -r /requirements.txt && \
-        airflow db init && \
-        airflow users create \
-          --username airflow \
-          --password airflow \
-          --firstname admin \
-          --lastname user \
-          --role Admin \
-          --email admin@example.com"
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "su - airflow -c 'pip install --no-cache-dir -r /requirements.txt &&
+        airflow db init &&
+        airflow users create --username airflow --password airflow --firstname admin --lastname user --role Admin --email admin@example.com'"
 
 volumes:
   postgres-db-volume:
