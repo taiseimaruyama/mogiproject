@@ -15,12 +15,15 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+      BQ_DATASET: sales_dataset
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Initialize Airflow DB + User
+      - name: Initialize Airflow DB + User + Variables
         run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
 
       - name: Wait after DB init
@@ -28,12 +31,6 @@ jobs:
 
       - name: Ensure DB is initialized
         run: docker compose run --rm airflow-cli airflow db check
-
-      - name: Set Airflow Variables
-        run: |
-          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
-          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
-          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
 
       - name: Start Airflow
         run: docker compose up -d
@@ -80,7 +77,7 @@ jobs:
       - name: Wait for DAG completion (with debug)
         run: |
           echo "⏳ Monitoring DAG Run"
-          for i in {1..3}; do   # 最大 1 分
+          for i in {1..30}; do
             latest=$(docker compose run --rm airflow-cli \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
             echo "Latest: $latest"
@@ -90,14 +87,8 @@ jobs:
               break
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
-              run_id=$(echo $latest | awk '{print $3}')
               docker compose run --rm airflow-cli \
-                airflow tasks states-for-dag-run industry_metrics_full_dag $run_id
-              # 失敗したタスクのログを出力
-              for task in preprocess_retail preprocess_ads; do
-                docker compose run --rm airflow-cli \
-                  airflow tasks logs industry_metrics_full_dag $task $run_id || true
-              done
+                airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
               exit 1
             fi
             sleep 20
