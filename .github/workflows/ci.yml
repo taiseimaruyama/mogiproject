@@ -15,9 +15,6 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
-      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-      BQ_DATASET: sales_dataset
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
@@ -25,12 +22,6 @@ jobs:
 
       - name: Initialize Airflow DB + User + Variables
         run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
-
-      - name: Wait after DB init
-        run: sleep 20
-
-      - name: Ensure DB is initialized
-        run: docker compose run --rm airflow-cli airflow db check
 
       - name: Start Airflow
         run: docker compose up -d
@@ -74,25 +65,23 @@ jobs:
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
-      - name: Wait for DAG completion (with debug)
+      - name: Wait for DAG completion (single check)
         run: |
-          echo "⏳ Monitoring DAG Run"
-          for i in {1..30}; do
-            latest=$(docker compose run --rm airflow-cli \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
-            echo "Latest: $latest"
+          echo "⏳ Checking DAG Run (single attempt)"
+          latest=$(docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+          echo "Latest: $latest"
 
-            if echo "$latest" | grep "success"; then
-              echo "✅ DAG finished successfully"
-              break
-            elif echo "$latest" | grep "failed"; then
-              echo "❌ DAG failed"
-              docker compose run --rm airflow-cli \
-                airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
-              exit 1
-            fi
-            sleep 20
-          done
+          if echo "$latest" | grep "success"; then
+            echo "✅ DAG finished successfully"
+          elif echo "$latest" | grep "failed"; then
+            echo "❌ DAG failed"
+            docker compose run --rm airflow-cli \
+              airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
+            exit 1
+          else
+            echo "⚠️ DAG is still running or not started yet"
+          fi
 
       - name: Upload output files to S3
         run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
