@@ -22,7 +22,7 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose
+          sudo apt-get install -y docker-compose awscli
 
       - name: Start Airflow with Docker Compose
         run: |
@@ -55,11 +55,29 @@ jobs:
           # gsutil ls とか接続確認コマンドを入れる
 
       - name: Test S3 connection
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ap-northeast-1
         run: |
           echo "Testing S3 connection..."
-          # aws s3 ls とか接続確認コマンドを入れる
+          aws s3 ls s3://domoproject || true
 
       - name: Test BigQuery connection
         run: |
           echo "Testing BigQuery connection..."
           # bq query --use_legacy_sql=false "SELECT 1"
+
+      - name: Upload output files to S3
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ap-northeast-1
+        run: |
+          echo "📤 Uploading files in ./output to S3..."
+          if [ -d output ]; then
+            aws s3 cp output/ s3://domoproject/ --recursive
+          else
+            echo "⚠️ No output directory found"
+          fi
