@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
 
     services:
       docker:
@@ -24,9 +26,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
+      # Airflow のDB初期化 & Adminユーザー作成
+      - name: Initialize Airflow DB
+        run: docker compose run --rm airflow-init
+
       - name: Start Airflow with Docker Compose
-        env:
-          AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
         run: docker compose up -d
 
       - name: Wait for Airflow webserver to be healthy
