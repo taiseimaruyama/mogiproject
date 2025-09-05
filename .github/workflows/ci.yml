@@ -40,6 +40,9 @@ jobs:
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
 
+      - name: Show running containers
+        run: docker compose ps -a
+
       - name: Wait for Airflow webserver to be healthy
         run: |
           for i in {1..30}; do
