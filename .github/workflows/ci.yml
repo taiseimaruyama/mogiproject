@@ -52,26 +52,12 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      # === 共通タスク (retail_ / ads_ 以外) を順番に実行 ===
-      - name: Run Common tasks sequentially
-        run: |
-          echo "🚀 Running Common tasks..."
-          TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag | \
-            awk '{print $1}' | grep -v "^\[" | grep -v "retail_" | grep -v "ads_" | tail -n +2)
-          for task in $TASKS; do
-            echo "🔎 Executing $task ..."
-            docker compose exec -T airflow-webserver \
-              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
-          done
-
       # === Retail 系タスクを順番に実行 ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag | \
-            awk '{print $1}' | grep "retail_")
+            airflow tasks list industry_metrics_full_dag --tree | grep "retail_" | awk '{print $1}' | sort -u)
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
@@ -83,32 +69,33 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag | \
-            awk '{print $1}' | grep "ads_")
+            airflow tasks list industry_metrics_full_dag --tree | grep "ads_" | awk '{print $1}' | sort -u)
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
               airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
           done
 
-      # === 接続確認 (GCS / S3 / BigQuery) ===
+      # === GCS 接続テスト ===
       - name: Test GCS connection
         run: |
           echo "Testing GCS connection..."
           docker compose exec -T airflow-webserver gsutil ls gs://${{ secrets.GCS_BUCKET }} || true
 
+      # === S3 接続テスト ===
       - name: Test S3 connection
         run: |
           echo "Testing S3 connection..."
           aws s3 ls s3://domoproject || true
 
+      # === BigQuery 接続テスト ===
       - name: Test BigQuery connection
         run: |
           echo "Testing BigQuery connection..."
           docker compose exec -T airflow-webserver \
             bq query --use_legacy_sql=false "SELECT 1" || true
 
-      # === AWS クレデンシャル設定 ===
+      # === AWS 認証設定 ===
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -116,7 +103,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-northeast-1
 
-      # === アウトプットを S3 へアップロード ===
+      # === 出力ファイルを S3 にアップロード ===
       - name: Upload output files to S3
         if: always()
         run: |
