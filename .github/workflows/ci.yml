@@ -50,7 +50,7 @@ jobs:
 
       - name: List DAGs
         run: docker compose run --rm airflow-cli -- \
-          bash -c 'airflow dags list'
+          bash -c "airflow dags list"
 
       - name: Prepare dummy input data
         run: |
