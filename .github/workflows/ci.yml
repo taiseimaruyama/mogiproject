@@ -42,7 +42,7 @@ jobs:
       - name: Wait for Airflow webserver to be healthy
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health; then
+            if curl -s http://localhost:8080/health | grep '"status": "healthy"'; then
               echo "✅ Airflow is healthy"
               exit 0
             fi
@@ -52,26 +52,48 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      # === Retail 系タスクを順番に実行（固定） ===
+      # === Retail 系タスクを順番に実行（固定 + リトライ付き） ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS="preprocess_retail calc_retail_metrics upload_retail_metrics_to_gcs load_retail_metrics_to_bq"
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
-            docker compose exec -T airflow-webserver \
-              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+            for retry in {1..5}; do
+              if docker compose exec -T airflow-webserver airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait; then
+                echo "✅ $task succeeded"
+                break
+              else
+                echo "⚠️ $task failed (retry $retry)"
+                sleep 10
+              fi
+              if [ $retry -eq 5 ]; then
+                echo "❌ $task failed after retries"
+                exit 1
+              fi
+            done
           done
 
-      # === Ads 系タスクを順番に実行（固定） ===
+      # === Ads 系タスクを順番に実行（固定 + リトライ付き） ===
       - name: Run Ads tasks sequentially
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS="preprocess_ads calc_ads_metrics upload_ads_metrics_to_s3"
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
-            docker compose exec -T airflow-webserver \
-              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+            for retry in {1..5}; do
+              if docker compose exec -T airflow-webserver airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait; then
+                echo "✅ $task succeeded"
+                break
+              else
+                echo "⚠️ $task failed (retry $retry)"
+                sleep 10
+              fi
+              if [ $retry -eq 5 ]; then
+                echo "❌ $task failed after retries"
+                exit 1
+              fi
+            done
           done
 
       - name: Test GCS connection
