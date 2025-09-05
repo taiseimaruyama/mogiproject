@@ -43,17 +43,39 @@ jobs:
       - name: Show running containers
         run: docker compose ps -a
 
-      - name: Wait for Airflow webserver to be healthy
+      - name: Wait for Airflow components to be ready
         run: |
-          for i in {1..30}; do
+          echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
+          for i in {1..60}; do
+            # Webserver health
             if curl -s http://localhost:8080/health | grep '"status": "healthy"'; then
-              echo "✅ Airflow is healthy"
-              exit 0
+              echo "✅ Webserver healthy"
+            else
+              echo "❌ Webserver not ready"
+              sleep 5
+              continue
             fi
-            echo "⏳ Still waiting... ($i)"
+
+            # Scheduler heartbeat
+            if docker compose exec -T airflow-scheduler airflow jobs check --job-type SchedulerJob --hostname "$(hostname)" >/dev/null 2>&1; then
+              echo "✅ Scheduler running"
+            else
+              echo "❌ Scheduler not ready"
+              sleep 5
+              continue
+            fi
+
+            # Worker heartbeat
+            if docker compose exec -T airflow-worker airflow jobs check --job-type WorkerJob --hostname "$(hostname)" >/dev/null 2>&1; then
+              echo "✅ Worker running"
+              exit 0
+            else
+              echo "❌ Worker not ready"
+            fi
+
             sleep 5
           done
-          echo "❌ Airflow did not become healthy in time"
+          echo "❌ Airflow components not ready in time"
           exit 1
 
       - name: Trigger DAG
