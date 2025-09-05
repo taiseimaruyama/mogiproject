@@ -62,13 +62,15 @@ jobs:
           PID1=$!
           docker compose logs --follow airflow-webserver &
           PID2=$!
+          docker compose logs --follow airflow-worker &
+          PID3=$!
 
           for i in {1..10}; do   # 30秒間隔 × 10回 = 最大5分
             RUNS=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state success | tail -n +3 | wc -l)
             if [ "$RUNS" -gt 0 ]; then
               echo "✅ DAG finished successfully"
-              kill $PID1 $PID2 || true
+              kill $PID1 $PID2 $PID3 || true
               exit 0
             fi
 
@@ -76,7 +78,7 @@ jobs:
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state failed | tail -n +3 | wc -l)
             if [ "$FAILS" -gt 0 ]; then
               echo "❌ DAG failed"
-              kill $PID1 $PID2 || true
+              kill $PID1 $PID2 $PID3 || true
               exit 1
             fi
 
@@ -85,7 +87,7 @@ jobs:
           done
 
           echo "❌ DAG did not finish within 5 minutes"
-          kill $PID1 $PID2 || true
+          kill $PID1 $PID2 $PID3 || true
           exit 1
 
       - name: Test GCS connection
