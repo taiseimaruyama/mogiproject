@@ -47,30 +47,37 @@ jobs:
           kill $LOG_PID
           exit 1
 
-      - name: Trigger Airflow DAG and wait for completion
+      - name: Trigger Airflow DAG (with live logs)
         run: |
           echo "🚀 Triggering DAG industry_metrics_full_dag"
           RUN_ID="ci_run_$(date +%s)"
           docker compose exec -T airflow-webserver \
             airflow dags trigger -r $RUN_ID industry_metrics_full_dag
 
-          echo "⏳ Polling DAG state (max 5 minutes, every 30s)..."
-          for i in {1..10}; do
+          echo "📡 Streaming Airflow logs in real-time..."
+          docker compose logs --follow airflow-scheduler &
+          docker compose logs --follow airflow-webserver &
+          LOG_PIDS="$!"
+
+          for i in {1..10}; do   # 30秒間隔 × 10回 = 最大5分
             STATUS=$(docker compose exec -T airflow-webserver \
               airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d))
             echo "[$i] DAG state: $STATUS"
 
             if [[ "$STATUS" == "success" ]]; then
               echo "✅ DAG finished successfully"
+              kill $LOG_PIDS || true
               exit 0
             elif [[ "$STATUS" == "failed" ]]; then
               echo "❌ DAG failed"
+              kill $LOG_PIDS || true
               exit 1
             fi
             sleep 30
           done
 
           echo "❌ DAG did not finish within 5 minutes"
+          kill $LOG_PIDS || true
           exit 1
 
       - name: Test GCS connection
