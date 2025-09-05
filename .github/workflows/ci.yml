@@ -39,11 +39,15 @@ jobs:
           sudo swapon /swapfile
           free -h
 
+      # Airflow 初期化
+      - name: Initialize Airflow
+        run: docker compose run --rm airflow-webserver airflow db init
+
       # docker compose に統一済み
       - name: Start Docker Compose
         run: docker compose -f docker-compose.yml up -d
 
-      # Airflow 初期化待機 + ヘルスチェック
+      # Webserver のヘルスチェック & ログ追従 (metadatabase + scheduler healthy 判定)
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "⏳ Waiting 120s for Airflow to initialize..."
@@ -59,8 +63,9 @@ jobs:
           while [ $elapsed -lt $timeout ]; do
             STATUS=$(curl -s http://localhost:8080/health || true)
             echo "Health response: $STATUS"
-            if echo "$STATUS" | grep -q '"status":"healthy"'; then
-              echo "✅ Airflow webserver is healthy"
+            if echo "$STATUS" | grep -q '"metadatabase":{"status":"healthy"}' \
+               && echo "$STATUS" | grep -q '"scheduler":{"status":"healthy"'; then
+              echo "✅ Airflow webserver is healthy (scheduler + metadatabase OK)"
               healthy=true
               break
             fi
