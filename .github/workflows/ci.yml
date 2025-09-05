@@ -62,40 +62,32 @@ jobs:
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
           for i in {1..15}; do
             if docker compose exec -T airflow-webserver \
-              airflow dags list | grep industry_metrics_full_dag; then
+              bash -c "airflow dags list | grep industry_metrics_full_dag"; then
               echo "✅ DAG loaded"
               break
             fi
-            echo "⏳ Still waiting for DAG... ($i)"
+            echo "⏳ Still loading... ($i)"
             sleep 10
           done
 
-      # 追加: DAG import エラー確認
       - name: Debug DAG import errors
-        run: docker compose exec -T airflow-webserver \
-          airflow dags list-import-errors || true
+        run: docker compose exec -T airflow-webserver bash -c "airflow dags list-import-errors || true"
 
-      # 追加: DAGに登録されているタスク確認
       - name: Debug DAG tasks
-        run: docker compose exec -T airflow-webserver \
-          airflow tasks list industry_metrics_full_dag || true
+        run: docker compose exec -T airflow-webserver bash -c "airflow tasks list industry_metrics_full_dag || true"
 
       - name: Trigger DAG
-        run: |
-          echo "🚀 Triggering DAG industry_metrics_full_dag..."
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+        run: docker compose exec -T airflow-webserver bash -c "airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag"
 
       - name: List DAG runs (debug)
-        run: docker compose exec -T airflow-webserver \
-          airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10
+        run: docker compose exec -T airflow-webserver bash -c "airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10"
 
       - name: Wait for DAG completion (30 min)
         run: |
           echo "Monitoring DAG Run (latest run)"
           for i in {1..90}; do
             latest=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+              bash -c "airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1")
             echo "Latest run: $latest"
             if echo "$latest" | grep "success"; then
               echo "✅ DAG finished successfully"
