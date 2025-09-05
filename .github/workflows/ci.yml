@@ -23,6 +23,12 @@ jobs:
       - name: Initialize Airflow DB + User + Variables
         run: docker compose run --rm airflow-init
 
+      - name: Wait after DB init
+        run: sleep 20
+
+      - name: Ensure DB is initialized
+        run: docker compose run --rm airflow-cli airflow db check
+
       - name: Start Airflow
         run: docker compose up -d
 
