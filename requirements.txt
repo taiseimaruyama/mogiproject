@@ -8,3 +8,6 @@ apache-airflow-providers-google
 apache-airflow-providers-amazon
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
+
+# Airflow が依存するバージョンを固定
+pendulum==2.1.2
