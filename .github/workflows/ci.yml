@@ -12,7 +12,6 @@ jobs:
 
     env:
       AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-      GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ap-northeast-1
@@ -21,62 +20,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Compose
-        run: docker compose version
-
-      - name: Debug docker-compose
-        run: cat docker-compose.yml
-
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-init
 
-      - name: Start Airflow with Docker Compose
+      - name: Start Airflow
         run: docker compose up -d
 
-      - name: Show running containers
-        run: docker compose ps -a
-
-      - name: Wait for Airflow components to be ready (with logs)
+      - name: Wait for Airflow components
         run: |
-          echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
+          echo "⏳ Waiting for Airflow..."
           for i in {1..30}; do
             ok=true
             for svc in airflow-webserver airflow-scheduler airflow-worker; do
               if ! docker compose ps $svc | grep "Up"; then
-                echo "❌ $svc not running"
                 ok=false
               fi
             done
-            if [ "$ok" = true ]; then
-              echo "✅ All components running"
-              break
-            fi
-            echo "⏳ Still waiting... ($i)"
-            docker compose logs --tail 20 airflow-worker || true
+            [ "$ok" = true ] && echo "✅ Airflow is running" && break
             sleep 10
           done
 
-      - name: Wait for DAG to be loaded
-        run: |
-          echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          for i in {1..15}; do
-            if docker compose exec -T airflow-webserver \
-              airflow dags list | grep industry_metrics_full_dag; then
-              echo "✅ DAG loaded"
-              break
-            fi
-            echo "⏳ Still waiting DAG... ($i)"
-            sleep 10
-          done
+      - name: Check DAG import errors
+        run: docker compose exec -T airflow-webserver airflow dags list-import-errors || true
 
-      - name: Set Airflow Variables
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow variables set gcs_bucket my-gcs-bucket-2025-demo
-          docker compose exec -T airflow-webserver \
-            airflow variables set s3_bucket domoproject
+      - name: List DAGs
+        run: docker compose exec -T airflow-webserver airflow dags list
 
-      - name: Prepare input CSVs
+      - name: Prepare dummy input data
         run: |
           mkdir -p input
           echo "date,sales,stock" > input/retail.csv
@@ -88,59 +58,31 @@ jobs:
           echo "5,50,100,25" >> input/ads.csv
 
       - name: Trigger DAG
-        run: |
-          echo "🚀 Triggering DAG industry_metrics_full_dag..."
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+        run: docker compose exec -T airflow-webserver \
+          airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
-      - name: List DAG runs (debug)
+      - name: Wait for DAG completion (with debug)
         run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10 || true
-
-      - name: Wait for DAG completion (30 min)
-        run: |
-          echo "Monitoring DAG Run (latest run)"
+          echo "⏳ Monitoring DAG Run"
           for i in {1..90}; do
             latest=$(docker compose exec -T airflow-webserver \
               airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
-            echo "Latest run: $latest"
+            echo "Latest: $latest"
+
             if echo "$latest" | grep "success"; then
               echo "✅ DAG finished successfully"
-              exit 0
+              break
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
+              docker compose exec -T airflow-webserver \
+                airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
               exit 1
             fi
-            echo "⏳ Still running... ($i)"
-            docker compose logs --tail 20 airflow-scheduler || true
-            docker compose logs --tail 20 airflow-worker || true
             sleep 20
           done
-          echo "⏳ DAG did not finish in 30 minutes"
-          exit 1
-
-      - name: Configure AWS credentials
-        run: |
-          mkdir -p ~/.aws
-          echo "[default]" > ~/.aws/credentials
-          echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}" >> ~/.aws/credentials
-          echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" >> ~/.aws/credentials
-          echo "region=${AWS_DEFAULT_REGION}" >> ~/.aws/credentials
-
-      - name: Test GCS connection
-        run: gsutil ls gs://dummy-bucket || true
-
-      - name: Test S3 connection
-        run: aws s3 ls || true
-
-      - name: Test BigQuery connection
-        run: bq ls || true
 
       - name: Upload output files to S3
-        run: |
-          echo "📤 Uploading files in ./output to S3..."
-          aws s3 cp ./output s3://domoproject/ --recursive
+        run: aws s3 cp ./output s3://domoproject/ --recursive
 
       - name: Stop containers
         if: always()
