@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # ← 追加ポイント: google-re2 ビルド用ライブラリを入れる
+      # google-re2 ビルド用ライブラリをインストール
       - name: Install system deps (for google-re2 build)
         run: |
           sudo apt-get update
@@ -94,7 +94,7 @@ jobs:
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
-      # ← 1回だけチェックする方式に変更
+      # 1回だけチェックする方式
       - name: Wait for DAG completion (single check)
         run: |
           echo "⏳ Checking DAG Run status once..."
@@ -116,6 +116,7 @@ jobs:
       - name: Upload output files to S3
         run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
 
+      # ---- ログ出力ステップ ----
       - name: Show airflow-init logs (always)
         if: always()
         run: docker compose logs airflow-init
@@ -127,6 +128,20 @@ jobs:
       - name: Show worker logs (always)
         if: always()
         run: docker compose logs airflow-worker
+
+      - name: Show task logs (always)
+        if: always()
+        run: |
+          run_id=$(docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
+            | head -n 5 | tail -n 1 | awk '{print $3}')
+          echo "📄 Fetching logs for DAG Run: $run_id"
+
+          docker compose run --rm airflow-cli \
+            airflow tasks logs industry_metrics_full_dag preprocess_retail "$run_id" || true
+
+          docker compose run --rm airflow-cli \
+            airflow tasks logs industry_metrics_full_dag preprocess_ads "$run_id" || true
 
       - name: Stop containers
         if: always()
