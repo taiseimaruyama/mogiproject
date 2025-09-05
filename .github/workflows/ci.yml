@@ -26,13 +26,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
+      # === GCP 認証ファイルを配置 ===
       - name: Set up GCP credentials
         run: |
           mkdir -p keys
           echo '${{ secrets.GCP_CREDENTIALS }}' > keys/gcp.json
 
+      # === Airflow DB 初期化 & Admin ユーザー作成 ===
       - name: Initialize Airflow DB
-        run: docker compose run --rm airflow-init
+        run: |
+          docker compose run --rm airflow-webserver airflow db init
+          docker compose run --rm airflow-webserver airflow users create \
+            --username airflow \
+            --password airflow \
+            --firstname admin \
+            --lastname user \
+            --role Admin \
+            --email admin@example.com
 
       - name: Start Airflow with Docker Compose
         run: docker compose up -d
@@ -40,6 +50,7 @@ jobs:
       - name: Show running containers
         run: docker compose ps -a
 
+      # === Webserver / Scheduler / Worker の起動を待機 ===
       - name: Wait for Airflow components to be ready (with worker logs)
         run: |
           echo "⏳ Waiting for Airflow webserver + scheduler + worker..."
@@ -63,10 +74,11 @@ jobs:
           echo "❌ Airflow components did not become ready in time"
           exit 1
 
+      # === DAG 実行 ===
       - name: Trigger DAG
         run: |
           RUN_ID="ci_run_$(date +%s)"
-          echo "Triggering DAG industry_metrics_full_dag with run_id=$RUN_ID"
+          echo "Triggering DAG with run_id=$RUN_ID"
           docker compose exec -T airflow-webserver \
             airflow dags trigger industry_metrics_full_dag --run-id "$RUN_ID"
           echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
@@ -85,9 +97,9 @@ jobs:
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
               exit 1
+            else
+              echo "⏳ DAG still running..."
             fi
-
-            echo "⏳ DAG still running... ($i)"
             sleep 20
           done
           echo "❌ DAG did not finish in 30 minutes"
