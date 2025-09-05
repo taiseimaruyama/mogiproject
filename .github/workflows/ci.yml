@@ -24,7 +24,7 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose jq
+          sudo apt-get install -y docker-compose
 
       # Airflow のDB初期化 & Adminユーザー作成
       - name: Initialize Airflow DB
@@ -35,7 +35,7 @@ jobs:
 
       - name: Wait for Airflow webserver to be healthy
         run: |
-          for i in {1..24}; do
+          for i in {1..30}; do
             if curl -s http://localhost:8080/health; then
               echo "✅ Airflow is healthy"
               exit 0
@@ -46,36 +46,29 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      - name: Trigger Airflow DAG
+      # === Retail 系タスクを順番に実行 ===
+      - name: Run Retail tasks sequentially
         run: |
-          echo "🚀 Triggering DAG industry_metrics_full_dag"
-          docker compose exec -T airflow-webserver \
-            airflow dags trigger industry_metrics_full_dag
-
-      # === DAGの全タスク詳細ログをリアルタイムで表示 ===
-      - name: Stream all Airflow task logs
-        run: |
-          echo "📡 Streaming all task logs for DAG industry_metrics_full_dag"
-
-          # 最新の DAG Run ID を取得
-          RUN_ID=$(docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill --output json \
-            | jq -r '.[0].run_id')
-          echo "🎯 Following logs for DAG Run: $RUN_ID"
-
-          # タスク一覧を取得
+          echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id')
-
-          # 各タスクのログをリアルタイムでストリーム
-          for TASK in $TASKS; do
-            echo "📡 Streaming logs for task: $TASK"
+            airflow tasks list industry_metrics_full_dag | grep "retail_" | awk '{print $1}')
+          for task in $TASKS; do
+            echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              airflow tasks logs industry_metrics_full_dag $TASK $RUN_ID --follow &
+              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
           done
 
-          # 全タスクが終了するまで待機
-          wait
+      # === Ads 系タスクを順番に実行 ===
+      - name: Run Ads tasks sequentially
+        run: |
+          echo "🚀 Running Ads tasks..."
+          TASKS=$(docker compose exec -T airflow-webserver \
+            airflow tasks list industry_metrics_full_dag | grep "ads_" | awk '{print $1}')
+          for task in $TASKS; do
+            echo "🔎 Executing $task ..."
+            docker compose exec -T airflow-webserver \
+              airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait || exit 1
+          done
 
       - name: Test GCS connection
         run: |
