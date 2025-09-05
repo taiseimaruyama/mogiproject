@@ -107,5 +107,3 @@ services:
 
 volumes:
   postgres-db-volume:
-
-AIRFLOW_UID=50000
