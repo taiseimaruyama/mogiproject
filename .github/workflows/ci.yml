@@ -70,9 +70,9 @@ jobs:
               continue
             fi
 
-            # Worker heartbeat
-            if docker compose exec -T airflow-worker airflow jobs check --job-type WorkerJob >/dev/null 2>&1; then
-              echo "✅ Worker running"
+            # Worker process check (not jobs check)
+            if docker compose exec -T airflow-worker ps aux | grep "celery worker" | grep -v grep; then
+              echo "✅ Worker process running"
               exit 0
             else
               echo "❌ Worker not ready"
@@ -82,6 +82,10 @@ jobs:
           done
           echo "❌ Airflow components not ready in time"
           exit 1
+
+      - name: Debug Airflow worker logs
+        if: always()
+        run: docker compose logs --tail=200 airflow-worker
 
       - name: Trigger DAG
         run: |
