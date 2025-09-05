@@ -60,13 +60,14 @@ jobs:
       - name: Wait for DAG to be loaded
         run: |
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          for i in {1..30}; do
+          for i in {1..15}; do
             if docker compose exec -T airflow-webserver \
               airflow dags list | grep "industry_metrics_full_dag"; then
               echo "✅ DAG loaded"
               break
             fi
-            echo "⏳ DAG not loaded yet... ($i)"
+            echo "⏳ Still waiting for DAG... ($i)"
+            docker compose logs --tail 20 airflow-webserver || true
             sleep 10
           done
 
@@ -75,10 +76,13 @@ jobs:
           echo "🚀 Triggering DAG industry_metrics_full_dag..."
           docker compose exec -T airflow-webserver \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
-
-          echo "📋 List DAG runs (debug)"
           docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 20
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 10
+
+      - name: List DAG runs (debug)
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill
 
       - name: Wait for DAG completion (30 min)
         run: |
@@ -92,11 +96,15 @@ jobs:
               exit 0
             elif echo "$latest" | grep "failed"; then
               echo "❌ DAG failed"
+              docker compose logs --tail 50 airflow-worker || true
+              docker compose logs --tail 50 airflow-scheduler || true
               exit 1
             fi
             sleep 20
           done
           echo "⏳ DAG did not finish in 30 minutes"
+          docker compose logs --tail 100 airflow-worker || true
+          docker compose logs --tail 100 airflow-scheduler || true
           exit 1
 
       - name: Configure AWS credentials
