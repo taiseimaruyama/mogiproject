@@ -5,27 +5,25 @@ services:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow"]
       interval: 5s
       retries: 5
-    networks:
-      - airflow-net
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
 
   redis:
     image: redis:latest
     ports:
       - "6379:6379"
-    networks:
-      - airflow-net
 
   airflow-webserver:
     image: apache/airflow:2.8.1
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -39,14 +37,14 @@ services:
     ports:
       - "8080:8080"
     command: webserver
-    networks:
-      - airflow-net
 
   airflow-scheduler:
     image: apache/airflow:2.8.1
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -58,14 +56,14 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     command: scheduler
-    networks:
-      - airflow-net
 
   airflow-worker:
     image: apache/airflow:2.8.1
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -77,14 +75,13 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
     command: celery worker
-    networks:
-      - airflow-net
 
   airflow-init:
     image: apache/airflow:2.8.1
     user: root
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -107,11 +104,6 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
-    networks:
-      - airflow-net
 
 volumes:
   postgres-db-volume:
-
-networks:
-  airflow-net:
