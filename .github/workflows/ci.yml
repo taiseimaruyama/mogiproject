@@ -52,21 +52,16 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           exit 1
 
-      # === jq を airflow-webserver コンテナにインストール ===
-      - name: Install jq inside airflow-webserver
-        run: |
-          docker compose exec -T airflow-webserver bash -c "apt-get update && apt-get install -y jq"
-
       # === Retail 系タスクを順番に実行 ===
       - name: Run Retail tasks sequentially
         run: |
           echo "🚀 Running Retail tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id' | grep '^preprocess_retail\|^calc_retail_metrics\|^upload_retail\|^load_retail'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_retail\|^calc_retail_metrics' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
           done
 
       # === Ads 系タスクを順番に実行 ===
@@ -74,11 +69,11 @@ jobs:
         run: |
           echo "🚀 Running Ads tasks..."
           TASKS=$(docker compose exec -T airflow-webserver \
-            bash -c "airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id' | grep '^preprocess_ads\|^calc_ads_metrics\|^upload_ads'")
+            bash -c "airflow tasks list industry_metrics_full_dag | grep '^preprocess_ads\|^calc_ads_metrics' | awk '{print \$1}'")
           for task in $TASKS; do
             echo "🔎 Executing $task ..."
             docker compose exec -T airflow-webserver \
-              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --wait" || exit 1
+              bash -c "airflow tasks run industry_metrics_full_dag $task $(date +%Y-%m-%d) --local --wait" || exit 1
           done
 
       - name: Test GCS connection
@@ -97,6 +92,7 @@ jobs:
           docker compose exec -T airflow-webserver \
             bq query --use_legacy_sql=false "SELECT 1" || true
 
+      # AWS認証を S3 アップロードの前に移動
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
