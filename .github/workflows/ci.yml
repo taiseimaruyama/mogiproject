@@ -24,7 +24,7 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose
+          sudo apt-get install -y docker-compose jq
 
       # Airflow のDB初期化 & Adminユーザー作成
       - name: Initialize Airflow DB
@@ -52,54 +52,30 @@ jobs:
           docker compose exec -T airflow-webserver \
             airflow dags trigger industry_metrics_full_dag
 
-      # === リアルタイムで scheduler / worker / webserver のログを流す ===
-      - name: Stream Airflow logs + Wait for DAG result
+      # === DAGの全タスク詳細ログをリアルタイムで表示 ===
+      - name: Stream all Airflow task logs
         run: |
-          echo "📡 Streaming Airflow logs in real-time..."
-          docker compose logs --tail=200 -f airflow-scheduler &
-          PID1=$!
-          docker compose logs --tail=200 -f airflow-worker &
-          PID2=$!
-          docker compose logs --tail=200 -f airflow-webserver &
-          PID3=$!
+          echo "📡 Streaming all task logs for DAG industry_metrics_full_dag"
 
-          for i in {1..40}; do   # 30秒 × 40回 = 最大20分
-            echo "⏳ Checking DAG status... ($i)"
-            
-            RUNS=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state success | tail -n +3 | wc -l)
-            if [ "$RUNS" -gt 0 ]; then
-              echo "✅ DAG finished successfully"
-              kill $PID1 $PID2 $PID3 || true
-              exit 0
-            fi
+          # 最新の DAG Run ID を取得
+          RUN_ID=$(docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill --output json \
+            | jq -r '.[0].run_id')
+          echo "🎯 Following logs for DAG Run: $RUN_ID"
 
-            FAILS=$(docker compose exec -T airflow-webserver \
-              airflow dags list-runs -d industry_metrics_full_dag --no-backfill --state failed | tail -n +3 | wc -l)
-            if [ "$FAILS" -gt 0 ]; then
-              echo "❌ DAG failed"
-              kill $PID1 $PID2 $PID3 || true
-              echo "📜 === Scheduler logs (last 200) ==="
-              docker compose logs --tail=200 airflow-scheduler
-              echo "📜 === Worker logs (last 200) ==="
-              docker compose logs --tail=200 airflow-worker
-              echo "📜 === Webserver logs (last 200) ==="
-              docker compose logs --tail=200 airflow-webserver
-              exit 1
-            fi
+          # タスク一覧を取得
+          TASKS=$(docker compose exec -T airflow-webserver \
+            airflow tasks list industry_metrics_full_dag --output json | jq -r '.[].task_id')
 
-            sleep 30
+          # 各タスクのログをリアルタイムでストリーム
+          for TASK in $TASKS; do
+            echo "📡 Streaming logs for task: $TASK"
+            docker compose exec -T airflow-webserver \
+              airflow tasks logs industry_metrics_full_dag $TASK $RUN_ID --follow &
           done
 
-          echo "❌ DAG did not finish within 20 minutes"
-          kill $PID1 $PID2 $PID3 || true
-          echo "📜 === Scheduler logs (last 200) ==="
-          docker compose logs --tail=200 airflow-scheduler
-          echo "📜 === Worker logs (last 200) ==="
-          docker compose logs --tail=200 airflow-worker
-          echo "📜 === Webserver logs (last 200) ==="
-          docker compose logs --tail=200 airflow-webserver
-          exit 1
+          # 全タスクが終了するまで待機
+          wait
 
       - name: Test GCS connection
         run: |
