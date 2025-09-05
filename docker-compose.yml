@@ -1,109 +1,93 @@
-services:
-  postgres:
-    image: postgres:13
-    environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow"]
-      interval: 5s
-      retries: 5
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+name: CI for Airflow DAG
 
-  redis:
-    image: redis:latest
-    ports:
-      - "6379:6379"
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-  airflow-webserver:
-    image: apache/airflow:2.8.1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    ports:
-      - "8080:8080"
-    command: webserver
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  airflow-scheduler:
-    image: apache/airflow:2.8.1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    command: scheduler
+    env:
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ap-northeast-1
 
-  airflow-worker:
-    image: apache/airflow:2.8.1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    command: celery worker
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-  airflow-init:
-    image: apache/airflow:2.8.1
-    user: root
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY}
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    command:
-      - bash
-      - -c
-      - |
-        airflow db init && \
-        airflow users create \
-          --username airflow \
-          --password airflow \
-          --firstname admin \
-          --lastname user \
-          --role Admin \
-          --email admin@example.com
+      - name: Initialize Airflow DB
+        run: docker compose run --rm airflow-init
 
-volumes:
-  postgres-db-volume:
+      - name: Start Airflow
+        run: docker compose up -d
+
+      - name: Wait for Airflow components
+        run: |
+          echo "⏳ Waiting for Airflow..."
+          for i in {1..30}; do
+            ok=true
+            for svc in airflow-webserver airflow-scheduler airflow-worker; do
+              if ! docker compose ps $svc | grep "Up"; then
+                ok=false
+              fi
+            done
+            [ "$ok" = true ] && echo "✅ Airflow is running" && break
+            sleep 10
+          done
+
+      - name: Set Airflow Variables
+        run: docker compose run --rm airflow-cli \
+          airflow variables set gcs_bucket domoproject
+
+      - name: Check DAG import errors
+        run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
+
+      - name: List DAGs
+        run: docker compose run --rm airflow-cli airflow dags list
+
+      - name: Prepare dummy input data
+        run: |
+          mkdir -p input
+          echo "date,sales,stock" > input/retail.csv
+          echo "2025-01-01,100,50" >> input/retail.csv
+          echo "2025-01-02,80,0" >> input/retail.csv
+
+          echo "clicks,impressions,revenue,spend" > input/ads.csv
+          echo "10,100,200,50" >> input/ads.csv
+          echo "5,50,100,25" >> input/ads.csv
+
+      - name: Trigger DAG
+        run: docker compose run --rm airflow-cli \
+          airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+
+      - name: Wait for DAG completion (with debug)
+        run: |
+          echo "⏳ Monitoring DAG Run"
+          for i in {1..90}; do
+            latest=$(docker compose run --rm airflow-cli \
+              airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+            echo "Latest: $latest"
+
+            if echo "$latest" | grep "success"; then
+              echo "✅ DAG finished successfully"
+              break
+            elif echo "$latest" | grep "failed"; then
+              echo "❌ DAG failed"
+              docker compose run --rm airflow-cli \
+                airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
+              exit 1
+            fi
+            sleep 20
+          done
+
+      - name: Upload output files to S3
+        run: aws s3 cp ./output s3://domoproject/ --recursive
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v
