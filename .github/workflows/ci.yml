@@ -1,50 +1,32 @@
-name: Airflow CI Pipeline
+name: CI for Airflow DAG
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: airflow
-          POSTGRES_PASSWORD: airflow
-          POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U airflow"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:6
-        ports:
-          - 6379:6379
+    env:
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-
+      # ← 追加ポイント: google-re2 ビルド用ライブラリを入れる
       - name: Install system deps (for google-re2 build)
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config libprotobuf-dev protobuf-compiler
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install apache-airflow[celery,postgres,redis]==2.6.3 \
@@ -52,34 +34,100 @@ jobs:
                       apache-airflow-providers-amazon \
                       psycopg2-binary \
                       pandas \
-                      boto3
+                      boto3 \
+                      google-re2
 
-      - name: Run Airflow init
-        run: docker compose run --rm airflow-init
-        env:
-          AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-          AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-          AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      - name: Initialize Airflow DB + User
+        run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
 
-      - name: Show airflow-init logs
+      - name: Wait after DB init
+        run: sleep 20
+
+      - name: Ensure DB is initialized
+        run: docker compose run --rm airflow-cli airflow db check
+
+      - name: Set Airflow Variables
+        run: |
+          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
+          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
+          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
+
+      - name: Start Airflow
+        run: docker compose up -d
+
+      - name: Wait for Airflow components
+        run: |
+          echo "⏳ Waiting for Airflow..."
+          for i in {1..30}; do
+            ok=true
+            for svc in airflow-webserver airflow-scheduler airflow-worker; do
+              if ! docker compose ps $svc | grep "Up"; then
+                ok=false
+              fi
+            done
+            [ "$ok" = true ] && echo "✅ Airflow is running" && break
+            sleep 10
+          done
+
+      - name: Check DAG import errors
+        run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
+
+      - name: List DAGs
+        run: docker compose run --rm airflow-cli airflow dags list
+
+      - name: Prepare dummy input data
+        run: |
+          mkdir -p input
+          echo "date,sales,stock" > input/retail.csv
+          echo "2025-01-01,100,50" >> input/retail.csv
+          echo "2025-01-02,80,0" >> input/retail.csv
+
+          echo "clicks,impressions,revenue,spend" > input/ads.csv
+          echo "10,100,200,50" >> input/ads.csv
+          echo "5,50,100,25" >> input/ads.csv
+
+      - name: Unpause DAG
+        run: docker compose run --rm airflow-cli airflow dags unpause industry_metrics_full_dag
+
+      - name: Trigger DAG
+        run: |
+          docker compose run --rm airflow-cli \
+            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+
+      # ← 1回だけチェックする方式に変更
+      - name: Wait for DAG completion (single check)
+        run: |
+          echo "⏳ Checking DAG Run status once..."
+          latest=$(docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+          echo "Latest: $latest"
+
+          if echo "$latest" | grep "success"; then
+            echo "✅ DAG finished successfully"
+          elif echo "$latest" | grep "failed"; then
+            echo "❌ DAG failed"
+            docker compose run --rm airflow-cli \
+              airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
+            exit 1
+          else
+            echo "⚠️ DAG still running or pending"
+          fi
+
+      - name: Upload output files to S3
+        run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
+
+      - name: Show airflow-init logs (always)
         if: always()
         run: docker compose logs airflow-init
 
-      - name: Run scheduler
-        run: docker compose up -d airflow-scheduler
-
-      - name: Run worker
-        run: docker compose up -d airflow-worker
-
-      - name: Run webserver
-        run: docker compose up -d airflow-webserver
-
-      - name: Show task logs
+      - name: Show scheduler logs (always)
         if: always()
-        run: |
-          docker compose logs airflow-scheduler
-          docker compose logs airflow-worker
-          docker compose logs airflow-webserver
+        run: docker compose logs airflow-scheduler
+
+      - name: Show worker logs (always)
+        if: always()
+        run: docker compose logs airflow-worker
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v
