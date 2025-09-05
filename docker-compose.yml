@@ -103,7 +103,8 @@ services:
           --firstname admin \
           --lastname user \
           --role Admin \
-          --email admin@example.com
+          --email admin@example.com && \
+        airflow variables set gcs_bucket domoproject
 
   airflow-cli:
     image: apache/airflow:2.8.1
@@ -114,7 +115,6 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    # command 削除 → airflow を直接呼べるようにする
 
 volumes:
   postgres-db-volume:
