@@ -12,7 +12,6 @@ INPUT_DIR = "/opt/airflow/input"
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 実行日を Airflow の execution_date から取得
 def dated_filename(prefix, suffix, ds=None):
     if ds is None:
         ds = datetime.now().strftime("%Y-%m-%d")
@@ -77,18 +76,22 @@ with DAG(
     dag_id="industry_metrics_full_dag",
     default_args=default_args,
     description="PoC: Retail & Ads KPI with dated outputs",
-    schedule_interval=None,  # CI 用に手動実行
+    schedule_interval=None,
     catchup=False,
     tags=["poc", "retail", "ads", "bigquery", "s3"],
 ) as dag:
 
     # Retail pipeline
-    retail_preprocess = PythonOperator(task_id="preprocess_retail", python_callable=preprocess_retail)
-    retail_metrics = PythonOperator(task_id="calc_retail_metrics", python_callable=calc_retail_metrics)
+    retail_preprocess = PythonOperator(
+        task_id="preprocess_retail", python_callable=preprocess_retail
+    )
+    retail_metrics = PythonOperator(
+        task_id="calc_retail_metrics", python_callable=calc_retail_metrics
+    )
 
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
-        src=dated_filename("retail_metrics", ".csv"),
+        src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",  # XComから取得
         dst="metrics/{{ ds }}/retail_metrics.csv",
         bucket="my-gcs-bucket-2025-demo",
     )
@@ -108,12 +111,16 @@ with DAG(
     )
 
     # Ads pipeline
-    ads_preprocess = PythonOperator(task_id="preprocess_ads", python_callable=preprocess_ads)
-    ads_metrics = PythonOperator(task_id="calc_ads_metrics", python_callable=calc_ads_metrics)
+    ads_preprocess = PythonOperator(
+        task_id="preprocess_ads", python_callable=preprocess_ads
+    )
+    ads_metrics = PythonOperator(
+        task_id="calc_ads_metrics", python_callable=calc_ads_metrics
+    )
 
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
-        filename=dated_filename("ads_metrics", ".csv"),
+        filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",  # XComから取得
         dest_key="metrics/{{ ds }}/ads_metrics.csv",
         dest_bucket="domoproject",
         replace=True,
