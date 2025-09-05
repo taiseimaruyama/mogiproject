@@ -1,4 +1,4 @@
-version: "3"
+version: '3.9'
 
 services:
   postgres:
@@ -11,42 +11,19 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
-    image: redis:6
-
-  airflow-init:
-    image: apache/airflow:2.8.1
-    depends_on:
-      - postgres
-      - redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=some_fernet_key
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    entrypoint: /bin/bash
-    command: -c "airflow db init && airflow users create \
-        --username airflow \
-        --firstname Admin \
-        --lastname User \
-        --role Admin \
-        --email admin@example.com \
-        --password airflow"
+    image: redis:latest
 
   airflow-webserver:
     image: apache/airflow:2.8.1
     restart: always
     depends_on:
-      - airflow-scheduler
       - postgres
       - redis
-      - airflow-init   # ✅ 初期化済みであることを保証
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=some_fernet_key
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key_here
+      - AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX=True
     ports:
       - "8080:8080"
     command: webserver
@@ -57,14 +34,32 @@ services:
     depends_on:
       - postgres
       - redis
-      - airflow-init   # ✅ 初期化済みであることを保証
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__FERNET_KEY=some_fernet_key
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key_here
     command: scheduler
+
+  airflow-init:
+    image: apache/airflow:2.8.1
+    depends_on:
+      - postgres
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init &&
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname Airflow \
+          --lastname Admin \
+          --role Admin \
+          --email admin@example.com
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your_fernet_key_here
 
 volumes:
   postgres_data:
