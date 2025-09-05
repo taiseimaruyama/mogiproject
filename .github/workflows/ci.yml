@@ -20,8 +20,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # DB 初期化 + ユーザ作成 + 変数設定
       - name: Initialize Airflow DB + User + Variables
-        run: docker compose run --rm airflow-init
+        run: docker compose up airflow-init
 
       - name: Wait after DB init
         run: sleep 20
