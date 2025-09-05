@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3"
 
 services:
   postgres:
@@ -87,11 +87,16 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
-    entrypoint: /bin/bash
+    entrypoint: /bin/bash -c
     command: >
-      -c "airflow db init &&
-          airflow users create --username airflow --password airflow \
-          --firstname admin --lastname user --role Admin --email admin@example.com"
+      "airflow db init &&
+       airflow users create
+       --username airflow
+       --password airflow
+       --firstname admin
+       --lastname user
+       --role Admin
+       --email admin@example.com"
 
 volumes:
   postgres-db-volume:
