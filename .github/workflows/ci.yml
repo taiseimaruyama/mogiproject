@@ -13,6 +13,7 @@ jobs:
     env:
       GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
 
     steps:
       - name: Set up job
@@ -21,13 +22,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # GCP 認証 (Secrets 使用)
+      # GCP 認証
       - name: Set up GCP credentials
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
-      # AWS 認証 (Secrets 使用)
+      # AWS 認証
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -43,15 +44,15 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # Airflow DB 初期化
+      # Airflow 初期化
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-init
 
-      # docker compose に統一済み
+      # Webserver 起動
       - name: Start Docker Compose
-        run: docker compose -f docker-compose.yml up -d
+        run: docker compose up -d
 
-      # Webserver のヘルスチェック & ログ追従
+      # ヘルスチェック & ログ
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow webserver..."
@@ -72,41 +73,31 @@ jobs:
             sleep $interval
             elapsed=$((elapsed + interval))
           done
+          kill $LOGS_PID || true
           if [ "$healthy" = false ]; then
             echo "❌ Airflow webserver did not become healthy in time"
-            docker compose logs airflow-webserver || true
-            docker compose logs airflow-scheduler || true
+            docker compose logs airflow-webserver
             exit 1
           fi
-          kill $LOGS_PID || true
 
       - name: Test GCS connection
-        run: |
-          echo "Testing GCS connection..."
-          gsutil ls gs://$GCS_BUCKET || exit 1
+        run: gsutil ls gs://$GCS_BUCKET || exit 1
 
       - name: Test S3 connection
-        run: |
-          echo "Testing S3 connection..."
-          aws s3 ls s3://$S3_BUCKET || exit 1
+        run: aws s3 ls s3://$S3_BUCKET || exit 1
 
       - name: Test BigQuery connection
-        run: |
-          echo "Testing BigQuery connection..."
-          bq query --use_legacy_sql=false "SELECT 1" || exit 1
+        run: bq query --use_legacy_sql=false "SELECT 1" || exit 1
 
       - name: Trigger DAG run
         run: |
-          echo "Triggering Airflow DAG run..."
           curl -X POST "http://localhost:8080/api/v1/dags/industry_metrics_full_dag/dagRuns" \
             -H "Content-Type: application/json" \
             --user "airflow:airflow" \
             -d '{"conf": {}}'
 
       - name: Wait for DAG to finish
-        run: |
-          echo "Waiting for DAG to finish..."
-          sleep 60
+        run: sleep 60
 
       - name: Run pytest
         run: pytest -v
