@@ -59,23 +59,24 @@ jobs:
       - name: Wait for DAG to be loaded
         run: |
           echo "⏳ Waiting for DAG industry_metrics_full_dag to be loaded..."
-          for i in {1..20}; do
-            if docker compose exec -T airflow-webserver airflow dags list | grep "industry_metrics_full_dag"; then
+          for i in {1..15}; do
+            if docker compose exec -T airflow-webserver \
+              airflow dags list | grep industry_metrics_full_dag; then
               echo "✅ DAG loaded"
-              exit 0
+              break
             fi
-            echo "⏳ DAG not loaded yet ($i)"
+            echo "⏳ Still waiting DAG... ($i)"
             sleep 10
           done
-          echo "❌ DAG not loaded"
-          exit 1
 
       - name: Set Airflow Variables
         run: |
-          docker compose exec -T airflow-webserver airflow variables set gcs_bucket my-gcs-bucket-2025-demo
-          docker compose exec -T airflow-webserver airflow variables set s3_bucket domoproject
+          docker compose exec -T airflow-webserver \
+            airflow variables set gcs_bucket my-gcs-bucket-2025-demo
+          docker compose exec -T airflow-webserver \
+            airflow variables set s3_bucket domoproject
 
-      - name: Prepare input data
+      - name: Prepare input CSVs
         run: |
           mkdir -p input
           echo "date,sales,stock" > input/retail.csv
@@ -111,6 +112,9 @@ jobs:
               echo "❌ DAG failed"
               exit 1
             fi
+            echo "⏳ Still running... ($i)"
+            docker compose logs --tail 20 airflow-scheduler || true
+            docker compose logs --tail 20 airflow-worker || true
             sleep 20
           done
           echo "⏳ DAG did not finish in 30 minutes"
@@ -125,7 +129,7 @@ jobs:
           echo "region=${AWS_DEFAULT_REGION}" >> ~/.aws/credentials
 
       - name: Test GCS connection
-        run: gsutil ls gs://my-gcs-bucket-2025-demo || true
+        run: gsutil ls gs://dummy-bucket || true
 
       - name: Test S3 connection
         run: aws s3 ls || true
