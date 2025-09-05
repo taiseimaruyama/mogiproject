@@ -26,6 +26,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
+      # === GCP 認証ファイルを配置 ===
+      - name: Set up GCP credentials
+        run: |
+          mkdir -p keys
+          echo '${{ secrets.GCP_CREDENTIALS }}' > keys/gcp.json
+
       # Airflow のDB初期化 & Adminユーザー作成
       - name: Initialize Airflow DB
         run: docker compose run --rm airflow-init
@@ -73,7 +79,7 @@ jobs:
       - name: Test GCS connection
         run: |
           echo "Testing GCS connection..."
-          # gsutil ls とか接続確認コマンドを入れる
+          docker compose exec -T airflow-webserver gsutil ls gs://${{ secrets.GCS_BUCKET }} || true
 
       - name: Test S3 connection
         run: |
@@ -83,7 +89,8 @@ jobs:
       - name: Test BigQuery connection
         run: |
           echo "Testing BigQuery connection..."
-          # bq query --use_legacy_sql=false "SELECT 1"
+          docker compose exec -T airflow-webserver \
+            bq query --use_legacy_sql=false "SELECT 1" || true
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
