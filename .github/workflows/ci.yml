@@ -22,7 +22,8 @@ jobs:
       - name: Set up Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose awscli
+          sudo apt-get install -y docker-compose
+          pip install awscli
 
       - name: Start Airflow with Docker Compose
         run: |
@@ -30,11 +31,9 @@ jobs:
 
       - name: Wait for Airflow webserver to be healthy (with logs follow)
         run: |
-          # バックグラウンドでログをリアルタイム追跡
           docker compose logs --follow airflow-webserver &
           LOG_PID=$!
 
-          # 最大120秒（5秒×24回）待機しつつ、ヘルスチェック
           for i in {1..24}; do
             if curl -s http://localhost:8080/health; then
               echo "✅ Airflow is healthy"
@@ -48,6 +47,14 @@ jobs:
           echo "❌ Airflow did not become healthy in time"
           kill $LOG_PID
           exit 1
+
+      - name: Trigger Airflow DAG
+        run: |
+          echo "🚀 Triggering DAG industry_metrics_full_dag"
+          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
+          echo "⏳ Waiting for DAG tasks to run..."
+          sleep 60
+          echo "✅ DAG trigger step finished"
 
       - name: Test GCS connection
         run: |
