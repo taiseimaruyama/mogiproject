@@ -1,4 +1,4 @@
-name: CI for Airflow DAG
+name: CI Airflow DAG
 
 on:
   push:
@@ -10,125 +10,52 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      # google-re2 ビルド用ライブラリをインストール
-      - name: Install system deps (for google-re2 build)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config libprotobuf-dev protobuf-compiler
+    - name: Set up Docker
+      run: docker --version
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install apache-airflow[celery,postgres,redis]==2.6.3 \
-                      apache-airflow-providers-google \
-                      apache-airflow-providers-amazon \
-                      psycopg2-binary \
-                      pandas \
-                      boto3 \
-                      google-re2
+    - name: Start Airflow
+      run: docker compose up -d --build
 
-      - name: Initialize Airflow DB + User
-        run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
+    - name: Wait for Airflow Init
+      run: |
+        echo "Waiting for Airflow DB init..."
+        sleep 60
 
-      - name: Wait after DB init
-        run: sleep 20
+    - name: Show airflow-init logs (always)
+      if: always()
+      run: docker compose logs airflow-init
 
-      - name: Ensure DB is initialized
-        run: docker compose run --rm airflow-cli airflow db check
+    - name: Trigger DAG run
+      run: |
+        run_id=$(docker compose run --rm airflow-cli \
+          airflow dags trigger industry_metrics_full_dag --run-id ci_run_${GITHUB_RUN_ID})
+        echo "Triggered: $run_id"
 
-      - name: Set Airflow Variables
-        run: |
-          docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
-          docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
-          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ env.S3_BUCKET }}
+    - name: Show DAG runs (always)
+      if: always()
+      run: docker compose run --rm airflow-cli \
+        airflow dags list-runs -d industry_metrics_full_dag --no-backfill
 
-      - name: Start Airflow
-        run: docker compose up -d
-
-      - name: Wait for Airflow components
-        run: |
-          echo "⏳ Waiting for Airflow..."
-          for i in {1..30}; do
-            ok=true
-            for svc in airflow-webserver airflow-scheduler airflow-worker; do
-              if ! docker compose ps $svc | grep "Up"; then
-                ok=false
-              fi
-            done
-            [ "$ok" = true ] && echo "✅ Airflow is running" && break
-            sleep 10
-          done
-
-      - name: Check DAG import errors
-        run: docker compose run --rm airflow-cli airflow dags list-import-errors || true
-
-      - name: List DAGs
-        run: docker compose run --rm airflow-cli airflow dags list
-
-      - name: Prepare dummy input data
-        run: |
-          mkdir -p input
-          echo "date,sales,stock" > input/retail.csv
-          echo "2025-01-01,100,50" >> input/retail.csv
-          echo "2025-01-02,80,0" >> input/retail.csv
-
-          echo "clicks,impressions,revenue,spend" > input/ads.csv
-          echo "10,100,200,50" >> input/ads.csv
-          echo "5,50,100,25" >> input/ads.csv
-
-      - name: Unpause DAG
-        run: docker compose run --rm airflow-cli airflow dags unpause industry_metrics_full_dag
-
-      - name: Trigger DAG
-        run: |
+    - name: Show task states for latest DAG run
+      run: |
+        run_id=$(docker compose run --rm airflow-cli \
+          airflow dags list-runs -d industry_metrics_full_dag --no-backfill --output table | awk 'NR==3 {print $2}')
+        if [ -z "$run_id" ]; then
+          echo "⚠️ No DAG run found, skipping task states"
+        else
           docker compose run --rm airflow-cli \
-            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+            airflow tasks states-for-dag-run industry_metrics_full_dag $run_id
+        fi
 
-      - name: Show DAG runs (always)
-        if: always()
-        run: docker compose run --rm airflow-cli airflow dags list-runs -d industry_metrics_full_dag --no-backfill
+    - name: Check output files
+      run: ls -lh ./output
 
-      - name: Show task states for latest DAG run
-        if: always()
-        run: |
-          run_id=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
-            | awk 'NR==3 {print $3}')
-          echo "📄 Task states for DAG Run: $run_id"
-          if [ -n "$run_id" ]; then
-            docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
-          else
-            echo "⚠️ No DAG run found, skipping task states"
-          fi
+    - name: Upload output files to S3
+      run: aws s3 cp ./output s3://domoproject/ --recursive
 
-      - name: Upload output files to S3
-        run: aws s3 cp ./output s3://${{ env.S3_BUCKET }}/ --recursive
-
-      # ---- ログ出力ステップ ----
-      - name: Show airflow-init logs (always)
-        if: always()
-        run: docker compose logs airflow-init
-
-      - name: Show scheduler logs (always)
-        if: always()
-        run: docker compose logs airflow-scheduler
-
-      - name: Show worker logs (always)
-        if: always()
-        run: docker compose logs airflow-worker
-
-      - name: Stop containers
-        if: always()
-        run: docker compose down -v
+    - name: Stop Docker
+      if: always()
+      run: docker compose down -v
