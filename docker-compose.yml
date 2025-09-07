@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   postgres:
     image: postgres:13
@@ -41,7 +43,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs    # ✅ ホストの logs をマウント
+      - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -53,7 +55,7 @@ services:
       - redis
     ports:
       - "8080:8080"
-    command: webserver
+    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow webserver"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -61,7 +63,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
+      - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -71,7 +73,7 @@ services:
       - airflow-init
       - postgres
       - redis
-    command: scheduler
+    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow scheduler"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -79,7 +81,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
+      - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -89,7 +91,7 @@ services:
       - airflow-init
       - postgres
       - redis
-    command: celery worker
+    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow celery worker"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -97,13 +99,14 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
+      - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
   airflow-cli:
     image: apache/airflow:2.6.3
-    entrypoint: ["airflow"]
+    entrypoint: bash
+    command: -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -111,7 +114,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
+      - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
