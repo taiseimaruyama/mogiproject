@@ -24,6 +24,7 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
       redis:
         image: redis:6
         ports:
@@ -43,11 +44,6 @@ jobs:
         with:
           python-version: "3.8"
 
-      - name: Prepare directories
-        run: |
-          mkdir -p logs output
-          chmod -R 777 logs output
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -66,7 +62,7 @@ jobs:
       - name: Wait for Airflow Init
         run: |
           for i in {1..20}; do
-            if docker compose logs airflow-init | grep -q "✅ Airflow init completed"; then
+            if docker compose logs airflow-init | grep -q "Airflow init"; then
               echo "Airflow initialized"
               break
             fi
@@ -81,24 +77,24 @@ jobs:
       - name: Trigger DAG run
         run: |
           run_id=$(docker compose run --rm airflow-cli \
-            airflow dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
+            dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
           echo "Triggered DAG with run_id=$run_id"
 
       - name: Show DAG runs (always)
         if: always()
         run: docker compose run --rm airflow-cli \
-          airflow dags list-runs -d industry_metrics_full_dag --no-backfill
+          dags list-runs -d industry_metrics_full_dag --no-backfill
 
       - name: Show task states for latest DAG run
         run: |
           run_id=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
+            dags list-runs -d industry_metrics_full_dag --no-backfill \
             | awk 'NR==3 {print $2}')
           if [ -z "$run_id" ]; then
             echo "⚠️ No DAG run found, skipping task states"
           else
             docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
+              tasks states-for-dag-run industry_metrics_full_dag "$run_id"
           fi
 
       - name: Upload output as artifact
