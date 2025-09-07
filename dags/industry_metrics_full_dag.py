@@ -19,49 +19,67 @@ def dated_filename(prefix, suffix, ds=None):
 
 # ---------- 小売業: 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
-    df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
-    df.loc[df["stock"] < 0, "stock"] = 0
-    out_path = dated_filename("retail_clean", ".csv", ds)
-    df.to_csv(out_path, index=False)
-    return out_path
+    try:
+        df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
+        df.loc[df["stock"] < 0, "stock"] = 0
+        out_path = dated_filename("retail_clean", ".csv", ds)
+        df.to_csv(out_path, index=False)
+        return out_path
+    finally:
+        # 保険として必ず CSV を残す
+        if "df" in locals():
+            df.to_csv(dated_filename("retail_clean_backup", ".csv", ds), index=False)
 
 # ---------- 小売業: KPI ----------
 def calc_retail_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
-    total_days = df["date"].nunique()
-    stockouts = df[df["stock"] == 0]
-    stockout_days = stockouts["date"].nunique()
-    avg_sales = df["sales"].mean()
+    try:
+        df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
+        total_days = df["date"].nunique()
+        stockouts = df[df["stock"] == 0]
+        stockout_days = stockouts["date"].nunique()
+        avg_sales = df["sales"].mean()
 
-    metrics = {
-        "total_days": total_days,
-        "stockout_days": stockout_days,
-        "stockout_rate": stockout_days / total_days,
-        "lost_sales_estimate": avg_sales * stockout_days,
-    }
-    out_path = dated_filename("retail_metrics", ".csv", ds)
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
-    return out_path
+        metrics = {
+            "total_days": total_days,
+            "stockout_days": stockout_days,
+            "stockout_rate": stockout_days / total_days,
+            "lost_sales_estimate": avg_sales * stockout_days,
+        }
+        out_path = dated_filename("retail_metrics", ".csv", ds)
+        pd.DataFrame([metrics]).to_csv(out_path, index=False)
+        return out_path
+    finally:
+        # 保険として必ず CSV を残す
+        if "metrics" in locals():
+            pd.DataFrame([metrics]).to_csv(dated_filename("retail_metrics_backup", ".csv", ds), index=False)
 
 # ---------- 広告業: 前処理 ----------
 def preprocess_ads(ds=None, **kwargs):
-    df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
-    df["CTR"] = df["clicks"] / df["impressions"]
-    df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = dated_filename("ads_clean", ".csv", ds)
-    df.to_csv(out_path, index=False)
-    return out_path
+    try:
+        df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
+        df["CTR"] = df["clicks"] / df["impressions"]
+        df["ROAS"] = df["revenue"] / df["spend"]
+        out_path = dated_filename("ads_clean", ".csv", ds)
+        df.to_csv(out_path, index=False)
+        return out_path
+    finally:
+        if "df" in locals():
+            df.to_csv(dated_filename("ads_clean_backup", ".csv", ds), index=False)
 
 # ---------- 広告業: KPI ----------
 def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
-    metrics = {
-        "avg_CTR": df["CTR"].mean(),
-        "avg_ROAS": df["ROAS"].mean(),
-    }
-    out_path = dated_filename("ads_metrics", ".csv", ds)
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
-    return out_path
+    try:
+        df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
+        metrics = {
+            "avg_CTR": df["CTR"].mean(),
+            "avg_ROAS": df["ROAS"].mean(),
+        }
+        out_path = dated_filename("ads_metrics", ".csv", ds)
+        pd.DataFrame([metrics]).to_csv(out_path, index=False)
+        return out_path
+    finally:
+        if "metrics" in locals():
+            pd.DataFrame([metrics]).to_csv(dated_filename("ads_metrics_backup", ".csv", ds), index=False)
 
 # ---------- DAG設定 ----------
 default_args = {
@@ -91,7 +109,7 @@ with DAG(
 
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
-        src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",  # XComから取得
+        src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
         dst="metrics/{{ ds }}/retail_metrics.csv",
         bucket="my-gcs-bucket-2025-demo",
     )
@@ -120,7 +138,7 @@ with DAG(
 
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
-        filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",  # XComから取得
+        filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
         dest_key="metrics/{{ ds }}/ads_metrics.csv",
         dest_bucket="domoproject",
         replace=True,
