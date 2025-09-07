@@ -34,6 +34,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./logs:/opt/airflow/logs   # ← ログをホストに出力
     ports:
       - "8080:8080"
     command: webserver
@@ -55,6 +56,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./logs:/opt/airflow/logs   # ← ログをホストに出力
     command: scheduler
 
   airflow-worker:
@@ -74,6 +76,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./logs:/opt/airflow/logs   # ← ログをホストに出力
     command: celery worker
 
   airflow-init:
@@ -92,6 +95,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./logs:/opt/airflow/logs   # ← ログをホストに出力
     command:
       - bash
       - -c
@@ -105,7 +109,6 @@ services:
           --lastname user \
           --role Admin \
           --email admin@example.com
-        # Set required Variables here (方法A)
         airflow variables set gcs_bucket ${GCS_BUCKET:-dummy_gcs}
         airflow variables set bq_dataset ${BQ_DATASET:-dummy_dataset}
         airflow variables set s3_bucket ${S3_BUCKET:-dummy_s3}
@@ -126,6 +129,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./logs:/opt/airflow/logs   # ← ログをホストに出力
 
 volumes:
   postgres-db-volume:
