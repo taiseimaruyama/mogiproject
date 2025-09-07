@@ -94,6 +94,13 @@ jobs:
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
+      # ---- 新規追加: DAG ランの生出力を必ず表示 ----
+      - name: Show DAG runs raw output
+        run: |
+          echo "📄 Showing raw DAG runs:"
+          docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill
+
       # 1回だけチェックする方式
       - name: Wait for DAG completion (single check)
         run: |
