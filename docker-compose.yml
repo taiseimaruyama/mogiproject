@@ -17,15 +17,12 @@ services:
 
   airflow-init:
     image: apache/airflow:2.6.3
-    user: "0:0"   # root で実行し権限操作を保証
     depends_on:
       - postgres
       - redis
     entrypoint: /bin/bash
     command: >
       -c "
-      mkdir -p /opt/airflow/logs &&
-      chmod -R 777 /opt/airflow/logs &&
       airflow db init &&
       airflow users create
         --username airflow
@@ -49,19 +46,13 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.6.3
-    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
       - redis
     ports:
       - "8080:8080"
-    command: >
-      bash -c "
-      mkdir -p /opt/airflow/logs &&
-      chmod -R 777 /opt/airflow/logs &&
-      airflow webserver
-      "
+    command: webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -75,17 +66,11 @@ services:
 
   airflow-scheduler:
     image: apache/airflow:2.6.3
-    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
       - redis
-    command: >
-      bash -c "
-      mkdir -p /opt/airflow/logs &&
-      chmod -R 777 /opt/airflow/logs &&
-      airflow scheduler
-      "
+    command: scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -99,17 +84,11 @@ services:
 
   airflow-worker:
     image: apache/airflow:2.6.3
-    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
       - redis
-    command: >
-      bash -c "
-      mkdir -p /opt/airflow/logs &&
-      chmod -R 777 /opt/airflow/logs &&
-      airflow celery worker
-      "
+    command: celery worker
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -124,7 +103,6 @@ services:
   airflow-cli:
     image: apache/airflow:2.6.3
     entrypoint: ["airflow"]
-    user: "0:0"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
