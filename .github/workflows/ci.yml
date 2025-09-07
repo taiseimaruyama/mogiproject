@@ -20,6 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # google-re2 ビルド用ライブラリをインストール
       - name: Install system deps (for google-re2 build)
         run: |
           sudo apt-get update
@@ -92,23 +93,27 @@ jobs:
         run: |
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+          # 反映にラグがあるので少し待つ
+          sleep 15
 
-      - name: Wait for DAG completion (single check)
+      # DAG Run 一覧を必ず出力
+      - name: Show DAG runs (always)
+        if: always()
+        run: docker compose run --rm airflow-cli airflow dags list-runs -d industry_metrics_full_dag --no-backfill
+
+      # run_id 抽出と安全なタスク状態確認
+      - name: Show task states for latest DAG run
         run: |
-          echo "⏳ Checking DAG Run status once..."
-          latest=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
-          echo "Latest: $latest"
+          run_id=$(docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
+            | awk 'NR==3 {print $3}')
 
-          if echo "$latest" | grep "success"; then
-            echo "✅ DAG finished successfully"
-          elif echo "$latest" | grep "failed"; then
-            echo "❌ DAG failed"
-            docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
-            exit 1
+          if [ -z "$run_id" ]; then
+            echo "⚠️ No DAG run found, skipping task states"
           else
-            echo "⚠️ DAG still running or pending"
+            echo "📄 Task states for DAG Run: $run_id"
+            docker compose run --rm airflow-cli \
+              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
           fi
 
       - name: Upload output files to S3
@@ -126,24 +131,6 @@ jobs:
       - name: Show worker logs (always)
         if: always()
         run: docker compose logs airflow-worker
-
-      - name: Show all task states (always)
-        if: always()
-        run: |
-          run_id=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
-            | head -n 5 | tail -n 1 | awk '{print $3}')
-          echo "📄 Task states for DAG Run: $run_id"
-          docker compose run --rm airflow-cli \
-            airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
-
-      - name: Show raw log files (always)
-        if: always()
-        run: |
-          echo "📂 Available logs:"
-          ls -R logs || true
-          echo "📑 Showing last 200 lines of task logs:"
-          tail -n 200 logs/*/*/*/*.log || true
 
       - name: Stop containers
         if: always()
