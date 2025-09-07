@@ -49,7 +49,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Prepare logs dir
-        run: mkdir -p logs && chmod 777 logs
+        run: |
+          mkdir -p logs
+          chmod -R 777 logs
 
       - name: Set environment variables
         run: |
@@ -64,7 +66,7 @@ jobs:
       - name: Wait for Airflow Init
         run: |
           for i in {1..20}; do
-            if docker compose logs airflow-init | grep -q "Airflow init"; then
+            if docker compose logs airflow-init | grep -q "Airflow init completed"; then
               echo "Airflow initialized"
               break
             fi
