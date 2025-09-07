@@ -9,5 +9,9 @@ apache-airflow-providers-amazon
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
 
+# Google Cloud SDKs (代替)
+google-cloud-storage
+google-cloud-bigquery
+
 # Airflow が依存するバージョンを固定
 pendulum==2.1.2
