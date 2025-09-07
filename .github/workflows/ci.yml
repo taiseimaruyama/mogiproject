@@ -15,6 +15,7 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
@@ -50,7 +51,7 @@ jobs:
         run: |
           docker compose run --rm airflow-cli airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
           docker compose run --rm airflow-cli airflow variables set bq_dataset sales_dataset
-          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
+          docker compose run --rm airflow-cli airflow variables set s3_bucket ${{ env.S3_BUCKET }}
 
       - name: Start Airflow
         run: docker compose up -d
@@ -94,26 +95,6 @@ jobs:
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
 
-      # 1回だけチェックする方式
-      - name: Wait for DAG completion (single check)
-        run: |
-          echo "⏳ Checking DAG Run status once..."
-          latest=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | awk 'NR>2 {print $0; exit}')
-          echo "Latest: $latest"
-
-          if echo "$latest" | grep "success"; then
-            echo "✅ DAG finished successfully"
-          elif echo "$latest" | grep "failed"; then
-            echo "❌ DAG failed"
-            run_id=$(echo "$latest" | awk '{print $3}')
-            docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
-            exit 1
-          else
-            echo "⚠️ DAG still running or pending"
-          fi
-
       - name: Show DAG runs (always)
         if: always()
         run: docker compose run --rm airflow-cli airflow dags list-runs -d industry_metrics_full_dag --no-backfill
@@ -123,18 +104,17 @@ jobs:
         run: |
           run_id=$(docker compose run --rm airflow-cli \
             airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
-            | awk 'NR>2 {print $3; exit}')
-
-          if [ -z "$run_id" ]; then
-            echo "⚠️ No DAG run found, skipping task states"
-          else
-            echo "📄 Task states for DAG Run: $run_id"
+            | awk 'NR==3 {print $3}')
+          echo "📄 Task states for DAG Run: $run_id"
+          if [ -n "$run_id" ]; then
             docker compose run --rm airflow-cli \
               airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
+          else
+            echo "⚠️ No DAG run found, skipping task states"
           fi
 
       - name: Upload output files to S3
-        run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
+        run: aws s3 cp ./output s3://${{ env.S3_BUCKET }}/ --recursive
 
       # ---- ログ出力ステップ ----
       - name: Show airflow-init logs (always)
