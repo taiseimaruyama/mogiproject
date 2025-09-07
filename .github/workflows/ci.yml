@@ -18,14 +18,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Prepare local folders (logs, output, input)
-        run: |
-          mkdir -p logs output input
-          chmod -R 777 logs output input
-
-      - name: Install system deps (for google-re2 build)
+      - name: Install system deps
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config libprotobuf-dev protobuf-compiler
@@ -44,12 +39,6 @@ jobs:
       - name: Initialize Airflow DB + User
         run: docker compose up --abort-on-container-exit --exit-code-from airflow-init airflow-init
 
-      - name: Wait after DB init
-        run: sleep 20
-
-      - name: Ensure DB is initialized
-        run: docker compose run --rm airflow-cli airflow db check
-
       - name: Start Airflow
         run: docker compose up -d
 
@@ -67,21 +56,63 @@ jobs:
             sleep 10
           done
 
-      - name: Trigger DAG
+      - name: Prepare dummy input data
         run: |
-          docker compose run --rm airflow-cli \
-            airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+          mkdir -p input
+          echo "date,sales,stock" > input/retail.csv
+          echo "2025-01-01,100,50" >> input/retail.csv
+          echo "2025-01-02,80,0" >> input/retail.csv
 
-      - name: Show DAG runs (always)
-        if: always()
-        run: docker compose run --rm airflow-cli airflow dags list-runs -d industry_metrics_full_dag --no-backfill
+          echo "clicks,impressions,revenue,spend" > input/ads.csv
+          echo "10,100,200,50" >> input/ads.csv
+          echo "5,50,100,25" >> input/ads.csv
 
-      - name: Upload artifacts (CSV/Parquet)
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Unpause DAG
+        run: docker compose run --rm airflow-cli dags unpause industry_metrics_full_dag
+
+      - name: Trigger DAG
+        run: docker compose run --rm airflow-cli dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
+
+      - name: Wait for DAG completion (single check)
+        run: |
+          echo "⏳ Checking DAG Run status once..."
+          latest=$(docker compose run --rm airflow-cli dags list-runs -d industry_metrics_full_dag --no-backfill | head -n 5 | tail -n 1)
+          echo "Latest: $latest"
+
+          if echo "$latest" | grep "success"; then
+            echo "✅ DAG finished successfully"
+          elif echo "$latest" | grep "failed"; then
+            echo "❌ DAG failed"
+            docker compose run --rm airflow-cli tasks states-for-dag-run industry_metrics_full_dag $(echo $latest | awk '{print $3}')
+            exit 1
+          else
+            echo "⚠️ DAG still running or pending"
+          fi
+
+      - name: Upload output files to S3
+        run: aws s3 cp ./output s3://${{ secrets.S3_BUCKET }}/ --recursive
+
+      - name: Upload output as artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: dag-outputs
-          path: output/*
+          name: airflow-output
+          path: output/
+
+      - name: Show airflow-init logs (always)
+        if: always()
+        run: docker compose logs airflow-init
+
+      - name: Show scheduler logs (always)
+        if: always()
+        run: docker compose logs airflow-scheduler
+
+      - name: Show worker logs (always)
+        if: always()
+        run: docker compose logs airflow-worker
+
+      - name: Show DAG run states (always)
+        if: always()
+        run: docker compose run --rm airflow-cli dags list-runs -d industry_metrics_full_dag --no-backfill
 
       - name: Stop containers
         if: always()
