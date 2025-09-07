@@ -1,4 +1,4 @@
-version: "3.9"
+version: '3.8'
 
 services:
   postgres:
@@ -55,7 +55,7 @@ services:
       - redis
     ports:
       - "8080:8080"
-    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow webserver"
+    command: webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -73,7 +73,7 @@ services:
       - airflow-init
       - postgres
       - redis
-    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow scheduler"
+    command: scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -91,7 +91,7 @@ services:
       - airflow-init
       - postgres
       - redis
-    command: bash -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow celery worker"
+    command: celery worker
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -105,8 +105,11 @@ services:
 
   airflow-cli:
     image: apache/airflow:2.6.3
-    entrypoint: bash
-    command: -c "mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs && airflow"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs
+        exec airflow
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
