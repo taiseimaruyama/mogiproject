@@ -9,7 +9,7 @@ apache-airflow-providers-amazon
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
 
-# Google Cloud SDKs (代替)
+# Google Cloud SDKs (安定版)
 google-cloud-storage
 google-cloud-bigquery
 
