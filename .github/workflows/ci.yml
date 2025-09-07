@@ -1,121 +1,112 @@
-services:
-  postgres:
-    image: postgres:13
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 10s
-      retries: 5
+name: CI
 
-  redis:
-    image: redis:latest
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-  airflow-init:
-    image: apache/airflow:2.6.3
-    user: root
-    depends_on:
-      - postgres
-      - redis
-    entrypoint: /bin/bash
-    command: >
-      -c "
-      mkdir -p /opt/airflow/logs &&
-      chmod -R 777 /opt/airflow/logs &&
-      airflow db init &&
-      airflow users create
-        --username airflow
-        --password airflow
-        --firstname Admin
-        --lastname User
-        --role Admin
-        --email admin@example.com &&
-      echo '✅ Airflow init completed'
-      "
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  airflow-webserver:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    ports:
-      - "8080:8080"
-    command: webserver
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: airflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U airflow"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
-  airflow-scheduler:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    command: scheduler
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+      redis:
+        image: redis:6
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
-  airflow-worker:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    command: celery worker
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  airflow-cli:
-    image: apache/airflow:2.6.3
-    entrypoint: ["airflow"]
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
 
-volumes:
-  postgres-db-volume:
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set environment variables
+        run: |
+          echo "AIRFLOW__CORE__LOAD_EXAMPLES=False" >> $GITHUB_ENV
+          echo "AIRFLOW__CORE__FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
+          echo "AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False" >> $GITHUB_ENV
+          echo "AIRFLOW__CORE__DAG_CONCURRENCY=1" >> $GITHUB_ENV
+
+      - name: Start Airflow
+        run: docker compose up -d --build
+
+      - name: Wait for Airflow Init
+        run: |
+          for i in {1..20}; do
+            if docker compose logs airflow-init | grep -q "Airflow init completed"; then
+              echo "Airflow initialized"
+              break
+            fi
+            echo "Waiting for Airflow init..."
+            sleep 10
+          done
+
+      - name: Show airflow-init logs (always)
+        if: always()
+        run: docker compose logs airflow-init
+
+      - name: Trigger DAG run
+        run: |
+          run_id=$(docker compose run --rm airflow-cli \
+            dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
+          echo "Triggered DAG with run_id=$run_id"
+
+      - name: Show DAG runs (always)
+        if: always()
+        run: docker compose run --rm airflow-cli \
+          dags list-runs -d industry_metrics_full_dag --no-backfill
+
+      - name: Show task states for latest DAG run
+        run: |
+          run_id=$(docker compose run --rm airflow-cli \
+            dags list-runs -d industry_metrics_full_dag --no-backfill \
+            | awk 'NR==3 {print $2}')
+          if [ -z "$run_id" ]; then
+            echo "⚠️ No DAG run found, skipping task states"
+          else
+            docker compose run --rm airflow-cli \
+              tasks states-for-dag-run industry_metrics_full_dag "$run_id"
+          fi
+
+      - name: Upload output as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: airflow-output
+          path: output/
+
+      - name: Show airflow logs (always)
+        if: always()
+        run: docker compose logs
+
+      - name: Shutdown services
+        if: always()
+        run: docker compose down -v
