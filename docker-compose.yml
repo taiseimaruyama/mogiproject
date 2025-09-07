@@ -23,6 +23,8 @@ services:
     entrypoint: /bin/bash
     command: >
       -c "
+      mkdir -p /opt/airflow/logs &&
+      chmod -R 777 /opt/airflow/logs &&
       airflow db init &&
       airflow users create
         --username airflow
