@@ -23,6 +23,7 @@ services:
     entrypoint: /bin/bash
     command: >
       -c "
+      mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs &&
       airflow db init &&
       airflow users create
         --username airflow
@@ -40,7 +41,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./logs:/opt/airflow/logs    # ✅ ホストの logs をマウント
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -60,7 +61,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -78,7 +79,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -96,7 +97,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
@@ -110,7 +111,7 @@ services:
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./logs:/opt/airflow/logs    # ✅ ログをマウント
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
 
