@@ -24,6 +24,7 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
       redis:
         image: redis:6
         ports:
@@ -47,13 +48,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # google-re2 が間接依存で入っても強制削除
-          pip uninstall -y google-re2 || true
 
-      - name: Prepare logs dir (permission fix)
+      - name: Prepare logs dir
         run: |
-          mkdir -p ./logs
-          chmod -R 777 ./logs
+          mkdir -p logs output
+          chmod -R 777 logs output
 
       - name: Set environment variables
         run: |
@@ -68,7 +67,7 @@ jobs:
       - name: Wait for Airflow Init
         run: |
           for i in {1..20}; do
-            if docker compose logs airflow-init | grep -q "Airflow init"; then
+            if docker compose logs airflow-init | grep -q "Airflow init completed"; then
               echo "✅ Airflow initialized"
               break
             fi
@@ -82,9 +81,8 @@ jobs:
 
       - name: Trigger DAG run
         run: |
-          run_id=$(docker compose run --rm airflow-cli \
-            airflow dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
-          echo "Triggered DAG with run_id=$run_id"
+          docker compose run --rm airflow-cli \
+            airflow dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s)
 
       - name: Show DAG runs (always)
         if: always()
