@@ -17,6 +17,7 @@ services:
 
   airflow-init:
     image: apache/airflow:2.6.3
+    user: "0:0"
     depends_on:
       - postgres
       - redis
@@ -46,6 +47,7 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.6.3
+    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
@@ -66,6 +68,7 @@ services:
 
   airflow-scheduler:
     image: apache/airflow:2.6.3
+    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
@@ -84,6 +87,7 @@ services:
 
   airflow-worker:
     image: apache/airflow:2.6.3
+    user: "0:0"
     depends_on:
       - airflow-init
       - postgres
@@ -102,6 +106,7 @@ services:
 
   airflow-cli:
     image: apache/airflow:2.6.3
+    user: "0:0"
     entrypoint: ["airflow"]
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
