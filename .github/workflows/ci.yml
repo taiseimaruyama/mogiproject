@@ -93,20 +93,37 @@ jobs:
         run: |
           docker compose run --rm airflow-cli \
             airflow dags trigger --run-id ci_run_${{ github.run_id }} industry_metrics_full_dag
-          # 反映にラグがあるので少し待つ
-          sleep 15
 
-      # DAG Run 一覧を必ず出力
+      # 1回だけチェックする方式
+      - name: Wait for DAG completion (single check)
+        run: |
+          echo "⏳ Checking DAG Run status once..."
+          latest=$(docker compose run --rm airflow-cli \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill | awk 'NR>2 {print $0; exit}')
+          echo "Latest: $latest"
+
+          if echo "$latest" | grep "success"; then
+            echo "✅ DAG finished successfully"
+          elif echo "$latest" | grep "failed"; then
+            echo "❌ DAG failed"
+            run_id=$(echo "$latest" | awk '{print $3}')
+            docker compose run --rm airflow-cli \
+              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
+            exit 1
+          else
+            echo "⚠️ DAG still running or pending"
+          fi
+
       - name: Show DAG runs (always)
         if: always()
         run: docker compose run --rm airflow-cli airflow dags list-runs -d industry_metrics_full_dag --no-backfill
 
-      # run_id 抽出と安全なタスク状態確認
       - name: Show task states for latest DAG run
+        if: always()
         run: |
           run_id=$(docker compose run --rm airflow-cli \
             airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
-            | awk 'NR==3 {print $3}')
+            | awk 'NR>2 {print $3; exit}')
 
           if [ -z "$run_id" ]; then
             echo "⚠️ No DAG run found, skipping task states"
