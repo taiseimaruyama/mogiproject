@@ -47,9 +47,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # google-re2 が間接依存で入っても強制削除
+          pip uninstall -y google-re2 || true
 
-      - name: Prepare logs dir
-        run: mkdir -p logs && chmod -R 777 logs
+      - name: Prepare logs dir (permission fix)
+        run: |
+          mkdir -p ./logs
+          chmod -R 777 ./logs
 
       - name: Set environment variables
         run: |
@@ -65,10 +69,10 @@ jobs:
         run: |
           for i in {1..20}; do
             if docker compose logs airflow-init | grep -q "Airflow init"; then
-              echo "Airflow initialized"
+              echo "✅ Airflow initialized"
               break
             fi
-            echo "Waiting for Airflow init..."
+            echo "⏳ Waiting for Airflow init..."
             sleep 10
           done
 
@@ -79,24 +83,24 @@ jobs:
       - name: Trigger DAG run
         run: |
           run_id=$(docker compose run --rm airflow-cli \
-            dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
+            airflow dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
           echo "Triggered DAG with run_id=$run_id"
 
       - name: Show DAG runs (always)
         if: always()
         run: docker compose run --rm airflow-cli \
-          dags list-runs -d industry_metrics_full_dag --no-backfill
+          airflow dags list-runs -d industry_metrics_full_dag --no-backfill
 
       - name: Show task states for latest DAG run
         run: |
           run_id=$(docker compose run --rm airflow-cli \
-            dags list-runs -d industry_metrics_full_dag --no-backfill \
+            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
             | awk 'NR==3 {print $2}')
           if [ -z "$run_id" ]; then
             echo "⚠️ No DAG run found, skipping task states"
           else
             docker compose run --rm airflow-cli \
-              tasks states-for-dag-run industry_metrics_full_dag "$run_id"
+              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
           fi
 
       - name: Upload output as artifact
