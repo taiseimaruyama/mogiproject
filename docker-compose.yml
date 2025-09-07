@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   postgres:
     image: postgres:13
@@ -9,6 +7,10 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
 
   redis:
     image: redis:latest
@@ -18,83 +20,99 @@ services:
     depends_on:
       - postgres
       - redis
+    entrypoint: /bin/bash
+    command: >
+      -c "
+      airflow db init &&
+      airflow users create
+        --username airflow
+        --password airflow
+        --firstname Admin
+        --lastname User
+        --role Admin
+        --email admin@example.com &&
+      echo '✅ Airflow init completed'
+      "
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
-    command: >
-      bash -c "
-      airflow db migrate &&
-      airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-      echo '✅ Airflow init completed'
-      "
+      - ./output:/opt/airflow/output
 
   airflow-webserver:
     image: apache/airflow:2.6.3
-    restart: always
     depends_on:
       - airflow-init
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - postgres
+      - redis
     ports:
       - "8080:8080"
+    command: webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
   airflow-scheduler:
     image: apache/airflow:2.6.3
-    restart: always
     depends_on:
       - airflow-init
+      - postgres
+      - redis
+    command: scheduler
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - ./output:/opt/airflow/output
 
   airflow-worker:
     image: apache/airflow:2.6.3
-    restart: always
     depends_on:
       - airflow-init
+      - postgres
+      - redis
+    command: celery worker
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - ./output:/opt/airflow/output
 
   airflow-cli:
     image: apache/airflow:2.6.3
-    depends_on:
-      - postgres
-      - redis
+    entrypoint: ["airflow"]
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ./output:/opt/airflow/output
       - ./input:/opt/airflow/input
-    entrypoint: ["airflow"]
+      - ./output:/opt/airflow/output
 
 volumes:
   postgres-db-volume:
