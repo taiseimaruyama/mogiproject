@@ -2,8 +2,8 @@ psycopg2-binary
 redis
 pytest
 
-# 必要な Airflow Providers
-apache-airflow-providers-google
+# 必要な Airflow Providers（GCS/BigQueryのみ）
+apache-airflow-providers-google[cloud]
 apache-airflow-providers-amazon
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
