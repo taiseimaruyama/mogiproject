@@ -63,14 +63,25 @@ jobs:
       - name: Start Airflow
         run: docker compose up -d --build
 
-      - name: Wait for Airflow Init
+      - name: Wait for Airflow DB ready
         run: |
-          for i in {1..20}; do
-            if docker compose logs airflow-init | grep -q "Airflow init completed"; then
-              echo "Airflow initialized"
+          for i in {1..30}; do
+            if docker compose run --rm airflow-cli airflow db check; then
+              echo "✅ Airflow DB is ready"
               break
             fi
-            echo "Waiting for Airflow init..."
+            echo "Waiting for Airflow DB..."
+            sleep 10
+          done
+
+      - name: Wait for webserver health
+        run: |
+          for i in {1..30}; do
+            if docker compose exec airflow-webserver curl -sf http://localhost:8080/health; then
+              echo "✅ Airflow webserver is healthy"
+              break
+            fi
+            echo "Waiting for Airflow webserver..."
             sleep 10
           done
 
