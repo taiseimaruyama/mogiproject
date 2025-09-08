@@ -11,7 +11,6 @@ apache-airflow-providers-redis
 # Google Cloud SDKs (安定版)
 google-cloud-storage
 google-cloud-bigquery
-google-re2==1.1.20250722   # 存在する最新の wheel 版を指定
 
 # Airflow が依存するバージョンを固定
 pendulum==2.1.2
