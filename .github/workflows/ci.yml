@@ -48,6 +48,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # 念のためホスト側に Airflow が残っていたら削除
+      - name: Remove host airflow if exists
+        run: pip uninstall -y apache-airflow || true
+
       - name: Debug which airflow
         run: which airflow || echo "No airflow on host"
 
@@ -64,8 +68,16 @@ jobs:
           echo "AIRFLOW__CORE__DAG_CONCURRENCY=1" >> $GITHUB_ENV
           echo "AIRFLOW__CORE__LOGGING_CONFIG_CLASS=airflow.config_templates.airflow_local_settings.DEFAULT_LOGGING_CONFIG" >> $GITHUB_ENV
 
+      # Airflow イメージを最新化（キャッシュ回避）
+      - name: Pull latest Airflow image
+        run: docker compose pull
+
       - name: Start Airflow
         run: docker compose up -d --build
+
+      # コンテナ内の Python バージョン確認
+      - name: Debug Airflow container Python version
+        run: docker compose run --rm airflow-cli python --version
 
       - name: Wait for Airflow DB ready
         run: |
