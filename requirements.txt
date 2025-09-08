@@ -2,17 +2,17 @@ psycopg2-binary
 redis
 pytest
 
-# 必要な Airflow Providers（GCS/BigQueryのみ）
-apache-airflow-providers-google[cloud]
+# 必要な Airflow Providers（最小限）
+apache-airflow-providers-google>=10.0.0
 apache-airflow-providers-amazon
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
 
-# Google Cloud SDKs (安定版)
+# Google Cloud SDKs
 google-cloud-storage>=2.10.0
 google-cloud-bigquery>=3.13.0
 
-# google-re2 を無効化（BigQuery の正規表現は使わないため不要）
+# google-re2 を無効化
 google-re2==0.0.0
 
 # Airflow が依存するバージョンを固定
