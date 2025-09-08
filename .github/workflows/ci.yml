@@ -48,6 +48,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug which airflow
+        run: which airflow || echo "No airflow on host"
+
       - name: Prepare logs dir
         run: |
           mkdir -p logs/scheduler
@@ -59,6 +62,7 @@ jobs:
           echo "AIRFLOW__CORE__FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
           echo "AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False" >> $GITHUB_ENV
           echo "AIRFLOW__CORE__DAG_CONCURRENCY=1" >> $GITHUB_ENV
+          echo "AIRFLOW__CORE__LOGGING_CONFIG_CLASS=airflow.config_templates.airflow_local_settings.DEFAULT_LOGGING_CONFIG" >> $GITHUB_ENV
 
       - name: Start Airflow
         run: docker compose up -d --build
