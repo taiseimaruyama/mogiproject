@@ -23,12 +23,11 @@ services:
       - postgres
       - redis
     entrypoint: /bin/bash
-    command: -c "
-      mkdir -p /opt/airflow/logs &&
-      airflow db init &&
-      airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-      echo '✅ Airflow init completed'
-    "
+    command: >-
+      bash -c "mkdir -p /opt/airflow/logs &&
+               airflow db init &&
+               airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
+               echo '✅ Airflow init completed'"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -105,9 +104,8 @@ services:
   airflow-cli:
     image: apache/airflow:2.6.3
     entrypoint: ["/bin/bash", "-c"]
-    command: |
-      mkdir -p /opt/airflow/logs
-      exec airflow
+    command: >-
+      bash -c "mkdir -p /opt/airflow/logs && exec airflow"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
