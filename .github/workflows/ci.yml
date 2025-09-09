@@ -9,140 +9,76 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: airflow
-          POSTGRES_PASSWORD: airflow
-          POSTGRES_DB: airflow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U airflow"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      redis:
-        image: redis:6
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
+      # Python セットアップ
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.8"
+          python-version: '3.9'
 
+      # pip キャッシュ
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # pip, setuptools, wheel を最新化
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      # 依存関係インストール
       - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Airflow 用の初期化処理（例: DB init, ユーザ作成など）
+      - name: Initialize Airflow
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          mkdir -p ./logs ./dags ./plugins
+          chmod -R 777 ./logs ./dags ./plugins
 
-      # ホストの Airflow を完全に削除
-      - name: Remove host airflow if exists
+      # docker-compose で Airflow 起動
+      - name: Start Airflow with docker-compose
         run: |
-          pip uninstall -y apache-airflow || true
-          rm -f ~/.local/bin/airflow || true
+          docker compose up -d --build
 
-      - name: Debug airflow on host
-        run: |
-          echo "Host airflow:"
-          which airflow || echo "✅ No airflow on host"
-
-      - name: Prepare logs dir
-        run: |
-          mkdir -p logs/scheduler
-          chmod -R 777 logs
-
-      - name: Set environment variables
-        run: |
-          echo "AIRFLOW__CORE__LOAD_EXAMPLES=False" >> $GITHUB_ENV
-          echo "AIRFLOW__CORE__FERNET_KEY=$(openssl rand -base64 32)" >> $GITHUB_ENV
-          echo "AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False" >> $GITHUB_ENV
-          echo "AIRFLOW__CORE__DAG_CONCURRENCY=1" >> $GITHUB_ENV
-          echo "AIRFLOW__CORE__LOGGING_CONFIG_CLASS=airflow.config_templates.airflow_local_settings.DEFAULT_LOGGING_CONFIG" >> $GITHUB_ENV
-
-      - name: Pull latest Airflow image
-        run: docker compose pull
-
-      - name: Start Airflow
-        run: docker compose up -d --build
-
-      - name: Debug Airflow container Python version
-        run: docker compose run --rm airflow-cli python --version
-
-      - name: Wait for Airflow DB ready
+      # Webserver ヘルスチェック
+      - name: Wait for Airflow webserver
         run: |
           for i in {1..30}; do
-            if docker compose run --rm airflow-cli airflow db check; then
-              echo "✅ Airflow DB is ready"
-              break
+            if curl -s http://localhost:8080/health | grep '"status":"healthy"' ; then
+              echo "Airflow is healthy!"
+              exit 0
             fi
-            echo "Waiting for Airflow DB..."
+            echo "Waiting for Airflow..."
             sleep 10
           done
+          echo "Airflow did not become healthy in time."
+          docker compose logs
+          exit 1
 
-      - name: Wait for webserver health
+      # DAG 実行テスト（例: industry_metrics_full_dag）
+      - name: Trigger DAG
         run: |
-          for i in {1..30}; do
-            if docker compose exec airflow-webserver curl -sf http://localhost:8080/health; then
-              echo "✅ Airflow webserver is healthy"
-              break
-            fi
-            echo "Waiting for Airflow webserver..."
-            sleep 10
-          done
+          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
 
-      - name: Debug logs dir
-        run: docker compose exec airflow-scheduler ls -l /opt/airflow/logs/scheduler || true
-
-      - name: Show airflow-init logs (always)
-        if: always()
-        run: docker compose logs airflow-init
-
-      - name: Trigger DAG run
+      # DAG のステータス確認
+      - name: Check DAG runs
         run: |
-          run_id=$(docker compose run --rm airflow-cli \
-            airflow dags trigger industry_metrics_full_dag --run-id ci_run_$(date +%s))
-          echo "Triggered DAG with run_id=$run_id"
+          docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag -n 1
 
-      - name: Show DAG runs (always)
+      # ログ収集
+      - name: Show logs
+        run: docker compose logs --tail=200
+
+      # 後処理
+      - name: Shutdown
         if: always()
-        run: docker compose run --rm airflow-cli \
-          airflow dags list-runs -d industry_metrics_full_dag --no-backfill
-
-      - name: Show task states for latest DAG run
-        run: |
-          run_id=$(docker compose run --rm airflow-cli \
-            airflow dags list-runs -d industry_metrics_full_dag --no-backfill \
-            | awk 'NR==3 {print $2}')
-          if [ -z "$run_id" ]; then
-            echo "⚠️ No DAG run found, skipping task states"
-          else
-            docker compose run --rm airflow-cli \
-              airflow tasks states-for-dag-run industry_metrics_full_dag "$run_id"
-          fi
-
-      - name: Upload output as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: airflow-output
-          path: output/
-
-      - name: Show airflow logs (always)
-        if: always()
-        run: docker compose logs
-
-      - name: Shutdown services
-        if: always()
-        run: docker compose down -v
+        run: docker compose down
