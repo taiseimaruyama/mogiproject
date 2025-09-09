@@ -81,12 +81,16 @@ jobs:
           echo "=== airflow-scheduler logs ==="
           docker compose logs airflow-scheduler || true
 
-      # DAG を backfill 実行（1日分）
+      # DAG を backfill 実行（必ず DagRun を作成）
       - name: Run DAG via backfill
         run: |
           docker compose exec -T airflow-webserver \
             airflow dags backfill industry_metrics_full_dag \
-            -s 2025-01-01 -e 2025-01-01
+            -s 2025-01-01 -e 2025-01-01 --reset-dagruns
+
+      # 少し待機（スケジューラが反映するまで）
+      - name: Wait after backfill
+        run: sleep 20
 
       # タスク状態を確認
       - name: Check task state (preprocess_ads)
@@ -110,11 +114,11 @@ jobs:
           docker compose exec -T airflow-webserver \
             airflow tasks test industry_metrics_full_dag calc_ads_metrics 2025-01-01 || true
 
-      # 出力ファイルの確認
+      # 出力ファイルの確認（コンテナ内）
       - name: Check output files
         run: |
-          ls -l ./output || true
-          cat ./output/*.csv || true
+          docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
+          docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
 
       # ログ収集（直近200行）
       - name: Show logs
