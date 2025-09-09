@@ -49,11 +49,11 @@ jobs:
         run: |
           docker compose up -d --build
 
-      # Webserver ヘルスチェック
+      # Webserver ヘルスチェック（コンテナ内から実行）
       - name: Wait for Airflow webserver
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep '"status":"healthy"' ; then
+            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
               echo "Airflow is healthy!"
               exit 0
             fi
