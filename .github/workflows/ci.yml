@@ -91,7 +91,7 @@ jobs:
       - name: Wait after trigger
         run: sleep 30
 
-      # DAGRun の状態を確認（--limit 削除）
+      # DAGRun の状態を確認
       - name: Check DAG runs
         run: |
           docker compose exec -T airflow-webserver \
@@ -107,6 +107,14 @@ jobs:
         run: |
           docker compose exec -T airflow-webserver \
             airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
+
+      # 🔎 scheduler ログ確認
+      - name: Debug scheduler logs
+        run: docker compose logs --tail=200 airflow-scheduler || true
+
+      # 🔎 worker ログ確認
+      - name: Debug worker logs
+        run: docker compose logs --tail=200 airflow-worker || true
 
       # 出力ファイルの確認（コンテナ内）
       - name: Check output files
