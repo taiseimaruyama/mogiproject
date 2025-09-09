@@ -24,7 +24,7 @@ services:
       - redis
     command: |
       bash -c "
-        mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs &&
+        mkdir -p /opt/airflow/logs &&
         airflow db init &&
         airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
         echo '✅ Airflow init completed'
@@ -100,7 +100,7 @@ services:
     image: apache/airflow:2.6.3
     entrypoint: ["/bin/bash", "-c"]
     command: |
-      mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs
+      mkdir -p /opt/airflow/logs
       exec airflow
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
