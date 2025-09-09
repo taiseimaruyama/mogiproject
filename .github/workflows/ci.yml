@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.9'
 
-      # ✅ pip キャッシュ（修正版）
+      # ✅ pip キャッシュ
       - name: Cache pip
         uses: actions/cache@v3
         with:
@@ -102,6 +102,12 @@ jobs:
 
       - name: Debug tasks list
         run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
+
+      - name: Debug DAG import errors
+        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
+
+      - name: Unpause DAG
+        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
       - name: Debug scheduler task dispatch
         run: docker compose logs airflow-scheduler | grep "Sending task" || true
