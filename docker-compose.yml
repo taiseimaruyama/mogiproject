@@ -26,13 +26,7 @@ services:
       bash -c "
         mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs &&
         airflow db init &&
-        airflow users create \
-          --username airflow \
-          --password airflow \
-          --firstname Admin \
-          --lastname User \
-          --role Admin \
-          --email admin@example.com &&
+        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
         echo '✅ Airflow init completed'
       "
     environment:
