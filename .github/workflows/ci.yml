@@ -38,21 +38,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Airflow 用の初期化処理（例: DB init, ユーザ作成など）
-      - name: Initialize Airflow
+      # Airflow 用の初期化ディレクトリ作成
+      - name: Initialize Airflow directories
         run: |
           mkdir -p ./logs ./dags ./plugins
           chmod -R 777 ./logs ./dags ./plugins
 
-      # docker-compose で Airflow 起動
-      - name: Start Airflow with docker-compose
+      # airflow-init を完了させる（重要！）
+      - name: Run Airflow init
         run: |
-          docker compose up -d --build
+          docker compose run --rm airflow-init
 
-      # Webserver ヘルスチェック（コンテナ内から実行）
+      # webserver / scheduler / worker を起動
+      - name: Start Airflow services
+        run: |
+          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+
+      # Webserver ヘルスチェック
       - name: Wait for Airflow webserver
         run: |
-          for i in {1..30}; do
+          for i in {1..60}; do
             if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
               echo "Airflow is healthy!"
               exit 0
