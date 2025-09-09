@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:13
@@ -22,16 +20,16 @@ services:
     depends_on:
       - postgres
       - redis
-    command: |
-      bash -c "
-        mkdir -p /opt/airflow/logs &&
-        airflow db init &&
-        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-        echo '✅ Airflow init completed'
-      "
+    entrypoint: /bin/bash
+    command: -c "
+      mkdir -p /opt/airflow/logs &&
+      airflow db init &&
+      airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
+      echo '✅ Airflow init completed'
+    "
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
@@ -42,6 +40,7 @@ services:
 
   airflow-webserver:
     image: apache/airflow:2.6.3
+    restart: on-failure
     depends_on:
       - airflow-init
       - postgres
@@ -51,7 +50,7 @@ services:
     command: webserver
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
@@ -59,9 +58,11 @@ services:
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+    user: "50000:0"
 
   airflow-scheduler:
     image: apache/airflow:2.6.3
+    restart: on-failure
     depends_on:
       - airflow-init
       - postgres
@@ -69,7 +70,7 @@ services:
     command: scheduler
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
@@ -77,9 +78,11 @@ services:
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+    user: "50000:0"
 
   airflow-worker:
     image: apache/airflow:2.6.3
+    restart: on-failure
     depends_on:
       - airflow-init
       - postgres
@@ -87,31 +90,9 @@ services:
     command: celery worker
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-
-  airflow-cli:
-    image: apache/airflow:2.6.3
-    entrypoint: ["/bin/bash", "-c"]
-    command: |
-      mkdir -p /opt/airflow/logs
-      exec airflow
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-
-volumes:
-  postgres-db-volume:
+      - ./logs:/opt/airflo
