@@ -41,8 +41,8 @@ jobs:
       # Airflow 用の初期化ディレクトリ作成（権限も整備）
       - name: Initialize Airflow directories
         run: |
-          sudo mkdir -p ./logs ./dags ./plugins
-          sudo chmod -R 777 ./logs ./dags ./plugins
+          sudo mkdir -p ./logs ./dags ./plugins ./input ./output
+          sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
       # airflow-init を完了させる（DB init + ユーザ作成）
       - name: Run Airflow init
@@ -81,20 +81,26 @@ jobs:
           echo "=== airflow-scheduler logs ==="
           docker compose logs airflow-scheduler || true
 
-      # DAG 一覧を確認（DAG がロードされているかチェック）
-      - name: List DAGs
+      # DAG を backfill 実行（当日分）
+      - name: Run DAG via backfill
         run: |
-          docker compose exec -T airflow-webserver airflow dags list
+          docker compose exec -T airflow-webserver \
+            airflow dags backfill -s $(date +%Y-%m-%d) -e $(date +%Y-%m-%d) industry_metrics_full_dag
 
-      # DAG 実行テスト（例: industry_metrics_full_dag）
-      - name: Trigger DAG
+      # タスクログ確認（例: preprocess_ads）
+      - name: Check task logs (preprocess_ads)
         run: |
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
+          docker compose exec -T airflow-webserver \
+            airflow tasks logs industry_metrics_full_dag preprocess_ads $(date +%Y-%m-%d) || true
 
-      # DAG のステータス確認（Airflow 2.7+ 対応）
-      - name: Check DAG state
+      - name: Check task logs (calc_ads_metrics)
         run: |
-          docker compose exec -T airflow-webserver airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d) || true
+          docker compose exec -T airflow-webserver \
+            airflow tasks logs industry_metrics_full_dag calc_ads_metrics $(date +%Y-%m-%d) || true
+
+      # 出力ファイル確認
+      - name: Check output files
+        run: ls -l ./output || true
 
       # ログ収集（直近200行）
       - name: Show logs
