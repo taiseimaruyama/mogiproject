@@ -15,13 +15,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Python セットアップ
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # pip キャッシュ
       - name: Cache pip
         uses: actions/cache@v3
         with:
@@ -30,31 +28,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # pip, setuptools, wheel を最新化
       - name: Upgrade pip
         run: python -m pip install --upgrade pip setuptools wheel
 
-      # 依存関係インストール
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Airflow 用の初期化ディレクトリ作成（権限も整備）
       - name: Initialize Airflow directories
         run: |
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-      # airflow-init を完了させる（DB init + ユーザ作成）
       - name: Run Airflow init
         run: |
           docker compose run --rm airflow-init
 
-      # webserver / scheduler / worker を起動
       - name: Start Airflow services
         run: |
           docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
-      # Webserver ヘルスチェック（最大15分待つ）
       - name: Wait for Airflow webserver
         run: |
           for i in {1..90}; do
@@ -69,7 +61,6 @@ jobs:
           docker compose logs
           exit 1
 
-      # デバッグ用ログ（常に出力）
       - name: Debug Airflow logs
         run: |
           echo "=== docker compose ps ==="
@@ -81,23 +72,19 @@ jobs:
           echo "=== airflow-scheduler logs ==="
           docker compose logs airflow-scheduler || true
 
-      # DAG を trigger 実行（execution_date を固定）
       - name: Trigger DAG
         run: |
           docker compose exec -T airflow-webserver \
             airflow dags trigger -e 2025-01-01 industry_metrics_full_dag
 
-      # 少し待機（スケジューラが処理するまで）
       - name: Wait after trigger
         run: sleep 30
 
-      # DAGRun の状態を確認
       - name: Check DAG runs
         run: |
           docker compose exec -T airflow-webserver \
             airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
 
-      # 個別タスクの状態確認
       - name: Check task state (preprocess_ads)
         run: |
           docker compose exec -T airflow-webserver \
@@ -108,25 +95,28 @@ jobs:
           docker compose exec -T airflow-webserver \
             airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
 
-      # 🔎 scheduler ログ確認
-      - name: Debug scheduler logs
-        run: docker compose logs --tail=200 airflow-scheduler || true
+      # === 追加デバッグ ===
+      - name: Debug DAG list
+        run: docker compose exec -T airflow-scheduler airflow dags list
 
-      # 🔎 worker ログ確認
-      - name: Debug worker logs
-        run: docker compose logs --tail=200 airflow-worker || true
+      - name: Debug tasks list
+        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
 
-      # 出力ファイルの確認（コンテナ内）
+      - name: Debug scheduler task dispatch
+        run: docker compose logs airflow-scheduler | grep "Sending task" || true
+
+      - name: Debug worker task reception
+        run: docker compose logs airflow-worker | grep "Task" || true
+      # ====================
+
       - name: Check output files
         run: |
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
           docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
 
-      # ログ収集（直近200行）
       - name: Show logs
         run: docker compose logs --tail=200
 
-      # 後処理
       - name: Shutdown
         if: always()
         run: docker compose down
