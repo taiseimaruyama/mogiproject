@@ -91,11 +91,11 @@ jobs:
       - name: Wait after trigger
         run: sleep 30
 
-      # DAGRun の状態を確認
+      # DAGRun の状態を確認（--limit 削除）
       - name: Check DAG runs
         run: |
           docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag --limit 5
+            airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
 
       # 個別タスクの状態確認
       - name: Check task state (preprocess_ads)
