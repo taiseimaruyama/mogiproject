@@ -95,7 +95,7 @@ jobs:
       - name: Check DAG runs
         run: |
           docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag -n 5
+            airflow dags list-runs -d industry_metrics_full_dag --limit 5
 
       # 個別タスクの状態確認
       - name: Check task state (preprocess_ads)
