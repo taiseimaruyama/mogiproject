@@ -69,18 +69,17 @@ jobs:
           docker compose logs
           exit 1
 
-      # デバッグ用ログ（失敗時のみ）
+      # デバッグ用ログ（常に出力）
       - name: Debug Airflow logs
-        if: failure()
         run: |
           echo "=== docker compose ps ==="
-          docker compose ps
+          docker compose ps || true
           echo
           echo "=== airflow-webserver logs ==="
-          docker compose logs airflow-webserver
+          docker compose logs airflow-webserver || true
           echo
           echo "=== airflow-scheduler logs ==="
-          docker compose logs airflow-scheduler
+          docker compose logs airflow-scheduler || true
 
       # DAG 実行テスト（例: industry_metrics_full_dag）
       - name: Trigger DAG
