@@ -22,20 +22,18 @@ services:
     depends_on:
       - postgres
       - redis
-    entrypoint: /bin/bash
-    command: >
-      -c "
+    command: bash -c "
       mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs &&
       airflow db init &&
-      airflow users create
-        --username airflow
-        --password airflow
-        --firstname Admin
-        --lastname User
-        --role Admin
+      airflow users create \
+        --username airflow \
+        --password airflow \
+        --firstname Admin \
+        --lastname User \
+        --role Admin \
         --email admin@example.com &&
       echo '✅ Airflow init completed'
-      "
+    "
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
