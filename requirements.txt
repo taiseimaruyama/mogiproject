@@ -12,8 +12,5 @@ apache-airflow-providers-redis
 google-cloud-storage>=2.10.0
 google-cloud-bigquery>=3.13.0
 
-# google-re2 を無効化
-google-re2==0.0.0
-
 # Airflow が依存するバージョンを固定
 pendulum==2.1.2
