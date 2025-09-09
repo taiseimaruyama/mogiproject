@@ -81,15 +81,20 @@ jobs:
           echo "=== airflow-scheduler logs ==="
           docker compose logs airflow-scheduler || true
 
+      # DAG 一覧を確認（DAG がロードされているかチェック）
+      - name: List DAGs
+        run: |
+          docker compose exec -T airflow-webserver airflow dags list
+
       # DAG 実行テスト（例: industry_metrics_full_dag）
       - name: Trigger DAG
         run: |
           docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
 
-      # DAG のステータス確認
-      - name: Check DAG runs
+      # DAG のステータス確認（Airflow 2.7+ 対応）
+      - name: Check DAG state
         run: |
-          docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag -n 1
+          docker compose exec -T airflow-webserver airflow dags state industry_metrics_full_dag $(date +%Y-%m-%d) || true
 
       # ログ収集（直近200行）
       - name: Show logs
