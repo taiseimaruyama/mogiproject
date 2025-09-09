@@ -1,104 +1,128 @@
-services:
-  postgres:
-    image: postgres:13
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 10s
-      retries: 5
+name: CI
 
-  redis:
-    image: redis:latest
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-  airflow-init:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - postgres
-      - redis
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        mkdir -p /opt/airflow/logs && \
-        airflow db init && \
-        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com && \
-        echo '✅ Airflow init completed'
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-  airflow-webserver:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    ports:
-      - "8080:8080"
-    command: webserver
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    user: "50000:0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-  airflow-scheduler:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    command: scheduler
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    user: "50000:0"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-  airflow-worker:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
-    command: celery worker
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-    user: "50000:0"
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-volumes:
-  postgres-db-volume:
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Initialize Airflow directories
+        run: |
+          sudo mkdir -p ./logs ./dags ./plugins ./input ./output
+          sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
+
+      - name: Run Airflow init
+        run: |
+          docker compose run --rm airflow-init
+
+      - name: Start Airflow services
+        run: |
+          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+
+      - name: Wait for Airflow webserver
+        run: |
+          for i in {1..90}; do
+            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q "healthy"; then
+              echo "Airflow is healthy!"
+              exit 0
+            fi
+            echo "Waiting for Airflow... ($i/90)"
+            sleep 10
+          done
+          echo "Airflow did not become healthy in time."
+          docker compose logs
+          exit 1
+
+      - name: Debug Airflow logs
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose ps || true
+          echo
+          echo "=== airflow-webserver logs ==="
+          docker compose logs airflow-webserver || true
+          echo
+          echo "=== airflow-scheduler logs ==="
+          docker compose logs airflow-scheduler || true
+
+      # === DAG 有効化を追加 ===
+      - name: Unpause DAG
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags unpause industry_metrics_full_dag
+
+      - name: Trigger DAG
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger -e 2025-01-01 industry_metrics_full_dag
+
+      - name: Wait after trigger
+        run: sleep 30
+
+      - name: Check DAG runs
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
+
+      - name: Check task state (preprocess_ads)
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
+
+      - name: Check task state (calc_ads_metrics)
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
+
+      # === 追加デバッグ ===
+      - name: Debug DAG list
+        run: docker compose exec -T airflow-scheduler airflow dags list
+
+      - name: Debug tasks list
+        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
+
+      - name: Debug scheduler task dispatch
+        run: docker compose logs airflow-scheduler | grep "Sending task" || true
+
+      - name: Debug worker task reception
+        run: docker compose logs airflow-worker | grep "Task" || true
+      # ====================
+
+      - name: Check output files
+        run: |
+          docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
+          docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
+
+      - name: Show logs
+        run: docker compose logs --tail=200
+
+      - name: Shutdown
+        if: always()
+        run: docker compose down
