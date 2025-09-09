@@ -38,11 +38,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Airflow 用の初期化ディレクトリ作成
+      # Airflow 用の初期化ディレクトリ作成（権限も整備）
       - name: Initialize Airflow directories
         run: |
-          mkdir -p ./logs ./dags ./plugins
-          chmod -R 777 ./logs ./dags ./plugins
+          sudo mkdir -p ./logs ./dags ./plugins
+          sudo chmod -R 777 ./logs ./dags ./plugins
 
       # airflow-init を完了させる（DB init + ユーザ作成）
       - name: Run Airflow init
@@ -68,6 +68,19 @@ jobs:
           echo "Airflow did not become healthy in time."
           docker compose logs
           exit 1
+
+      # デバッグ用ログ（失敗時のみ）
+      - name: Debug Airflow logs
+        if: failure()
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose ps
+          echo
+          echo "=== airflow-webserver logs ==="
+          docker compose logs airflow-webserver
+          echo
+          echo "=== airflow-scheduler logs ==="
+          docker compose logs airflow-scheduler
 
       # DAG 実行テスト（例: industry_metrics_full_dag）
       - name: Trigger DAG
