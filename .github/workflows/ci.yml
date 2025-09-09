@@ -1,89 +1,117 @@
-name: CI
+version: '3.8'
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  redis:
+    image: redis:latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+  airflow-init:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - postgres
+      - redis
+    command: |
+      bash -c "
+        mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs &&
+        airflow db init &&
+        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
+        echo '✅ Airflow init completed'
+      "
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
-      # Python セットアップ
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+  airflow-webserver:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - airflow-init
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+    command: webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
-      # pip キャッシュ
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+  airflow-scheduler:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - airflow-init
+      - postgres
+      - redis
+    command: scheduler
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
-      # pip, setuptools, wheel を最新化
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip setuptools wheel
+  airflow-worker:
+    image: apache/airflow:2.6.3
+    depends_on:
+      - airflow-init
+      - postgres
+      - redis
+    command: celery worker
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
-      # 依存関係インストール
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+  airflow-cli:
+    image: apache/airflow:2.6.3
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      mkdir -p /opt/airflow/logs && chmod -R 777 /opt/airflow/logs
+      exec airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
 
-      # Airflow 用の初期化ディレクトリ作成
-      - name: Initialize Airflow directories
-        run: |
-          mkdir -p ./logs ./dags ./plugins
-          chmod -R 777 ./logs ./dags ./plugins
-
-      # airflow-init を完了させる（重要！）
-      - name: Run Airflow init
-        run: |
-          docker compose run --rm airflow-init
-
-      # webserver / scheduler / worker を起動
-      - name: Start Airflow services
-        run: |
-          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
-
-      # Webserver ヘルスチェック
-      - name: Wait for Airflow webserver
-        run: |
-          for i in {1..60}; do
-            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "Airflow is healthy!"
-              exit 0
-            fi
-            echo "Waiting for Airflow..."
-            sleep 10
-          done
-          echo "Airflow did not become healthy in time."
-          docker compose logs
-          exit 1
-
-      # DAG 実行テスト（例: industry_metrics_full_dag）
-      - name: Trigger DAG
-        run: |
-          docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
-
-      # DAG のステータス確認
-      - name: Check DAG runs
-        run: |
-          docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag -n 1
-
-      # ログ収集
-      - name: Show logs
-        run: docker compose logs --tail=200
-
-      # 後処理
-      - name: Shutdown
-        if: always()
-        run: docker compose down
+volumes:
+  postgres-db-volume:
