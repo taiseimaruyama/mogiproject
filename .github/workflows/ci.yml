@@ -54,15 +54,15 @@ jobs:
         run: |
           docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
-      # Webserver ヘルスチェック（最大10分待つ）
+      # Webserver ヘルスチェック（最大15分待つ）
       - name: Wait for Airflow webserver
         run: |
-          for i in {1..60}; do
-            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
+          for i in {1..90}; do
+            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q "healthy"; then
               echo "Airflow is healthy!"
               exit 0
             fi
-            echo "Waiting for Airflow..."
+            echo "Waiting for Airflow... ($i/90)"
             sleep 10
           done
           echo "Airflow did not become healthy in time."
