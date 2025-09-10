@@ -44,13 +44,27 @@ jobs:
         run: |
           docker compose run --rm airflow-init
 
-      # ✅ Airflow Variables を追加
+      # ✅ Connection/Variables 確認用ログ
+      - name: Debug Airflow connections & variables
+        run: |
+          docker compose up -d airflow-webserver
+          sleep 15
+          echo "=== Airflow Connections ==="
+          docker compose exec -T airflow-webserver airflow connections list
+          echo
+          echo "=== Airflow Variables ==="
+          docker compose exec -T airflow-webserver airflow variables list
+          docker compose down
+
+      # ✅ Airflow Variables を追加（Secrets）
       - name: Set Airflow Variables
         run: |
           docker compose up -d airflow-webserver
           sleep 20
           docker compose exec -T airflow-webserver \
-            airflow variables set gcs_bucket my-bucket-name
+            airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
+          docker compose exec -T airflow-webserver \
+            airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
           docker compose down
 
       - name: Start Airflow services
