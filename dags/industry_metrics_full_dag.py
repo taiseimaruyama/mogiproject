@@ -13,9 +13,12 @@ INPUT_DIR = "/opt/airflow/input"
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# バケット名を Airflow Variables から取得
+# バケット名は Secrets 経由（Airflow Variables）
 GCS_BUCKET = Variable.get("gcs_bucket", default_var="my-gcs-bucket-2025-demo")
 S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
+
+# BigQuery は本番用に固定
+BQ_TABLE = "striking-yen-470200-u3.sales_dataset.retail_metrics"
 
 def dated_filename(prefix, suffix, ds=None):
     if ds is None:
@@ -96,7 +99,7 @@ default_args = {
 with DAG(
     dag_id="industry_metrics_full_dag",
     default_args=default_args,
-    description="Retail & Ads KPI pipeline with GCS/S3 upload",
+    description="Retail & Ads KPI pipeline with GCS/S3 upload + BigQuery load",
     schedule_interval=None,
     catchup=False,
     tags=["poc", "retail", "ads", "bigquery", "s3"],
@@ -121,8 +124,8 @@ with DAG(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
         source_objects=["metrics/{{ ds }}/retail_metrics.csv"],
-        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",
-        autodetect=True,  # ✅ 本番なら schema 固定推奨、PoC ならこれで便利
+        destination_project_dataset_table=BQ_TABLE,  # 固定
+        autodetect=True,
         write_disposition="WRITE_TRUNCATE",
     )
 
