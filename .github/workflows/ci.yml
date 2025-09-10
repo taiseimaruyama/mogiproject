@@ -39,6 +39,17 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
+      # ✅ ダミーデータ生成（毎回用意）
+      - name: Generate dummy input data
+        run: |
+          mkdir -p input
+          echo "date,product,sales,stock" > input/retail.csv
+          echo "2025-01-01,A,100,10" >> input/retail.csv
+          echo "2025-01-02,A,120,0" >> input/retail.csv
+          echo "date,impressions,clicks,spend,revenue" > input/ads.csv
+          echo "2025-01-01,1000,50,200,500" >> input/ads.csv
+          echo "2025-01-02,800,20,100,150" >> input/ads.csv
+
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
@@ -87,7 +98,6 @@ jobs:
           docker compose logs airflow-webserver || true
           docker compose logs airflow-scheduler || true
 
-      # ✅ Trigger 前に Unpause
       - name: Unpause DAG
         run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
@@ -119,11 +129,12 @@ jobs:
       - name: Debug DAG import errors
         run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
-      - name: Debug scheduler logs
-        run: docker compose logs airflow-scheduler --tail=200 || true
+      # === ログを必ず出す ===
+      - name: Debug scheduler logs (full)
+        run: docker compose logs airflow-scheduler || true
 
-      - name: Debug worker logs
-        run: docker compose logs airflow-worker --tail=200 || true
+      - name: Debug worker logs (full)
+        run: docker compose logs airflow-worker || true
 
       - name: Check output files
         run: |
