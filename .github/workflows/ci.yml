@@ -140,9 +140,9 @@ jobs:
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
           docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
 
-      # ✅ Artifact に成果物アップロード
+      # ✅ Artifact に成果物アップロード (v4)
       - name: Upload output as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: airflow-output
           path: ./output/*.csv
