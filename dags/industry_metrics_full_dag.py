@@ -26,7 +26,6 @@ def preprocess_retail(ds=None, **kwargs):
         df.to_csv(out_path, index=False)
         return out_path
     finally:
-        # 保険として必ず CSV を残す
         if "df" in locals():
             df.to_csv(dated_filename("retail_clean_backup", ".csv", ds), index=False)
 
@@ -49,7 +48,6 @@ def calc_retail_metrics(ds=None, **kwargs):
         pd.DataFrame([metrics]).to_csv(out_path, index=False)
         return out_path
     finally:
-        # 保険として必ず CSV を残す
         if "metrics" in locals():
             pd.DataFrame([metrics]).to_csv(dated_filename("retail_metrics_backup", ".csv", ds), index=False)
 
@@ -119,12 +117,7 @@ with DAG(
         bucket="my-gcs-bucket-2025-demo",
         source_objects=["metrics/{{ ds }}/retail_metrics.csv"],
         destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",
-        schema_fields=[
-            {"name": "total_days", "type": "INTEGER"},
-            {"name": "stockout_days", "type": "INTEGER"},
-            {"name": "stockout_rate", "type": "FLOAT"},
-            {"name": "lost_sales_estimate", "type": "FLOAT"},
-        ],
+        autodetect=True,   # ✅ CSV のスキーマを自動推定
         write_disposition="WRITE_TRUNCATE",
     )
 
