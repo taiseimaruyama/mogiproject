@@ -73,7 +73,7 @@ jobs:
             airflow connections delete aws_default || true
             airflow connections add aws_default \
               --conn-type aws \
-              --conn-extra '{\"aws_access_key_id\": \"${{ secrets.AWS_ACCESS_KEY_ID }}\", \"aws_secret_access_key\": \"${{ secrets.AWS_SECRET_ACCESS_KEY }}\", \"region_name\": \"${{ secrets.AWS_REGION }}\"}'
+              --conn-extra '{\"extra__aws_access_key_id\": \"${{ secrets.AWS_ACCESS_KEY_ID }}\", \"extra__aws_secret_access_key\": \"${{ secrets.AWS_SECRET_ACCESS_KEY }}\", \"region_name\": \"${{ secrets.AWS_REGION }}\"}'
           "
 
           docker compose down
@@ -143,16 +143,16 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスク詳細ログ確認
+      # ✅ タスク詳細ログ確認 (古い Airflow 用に直接ファイルを cat)
       - name: Debug task logs (upload_retail_metrics_to_gcs)
         run: |
           docker compose exec -T airflow-webserver \
-            airflow tasks logs industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01 || true
+            cat /opt/airflow/logs/dag_id=industry_metrics_full_dag/task_id=upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Debug task logs (upload_ads_metrics_to_s3)
         run: |
           docker compose exec -T airflow-webserver \
-            airflow tasks logs industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01 || true
+            cat /opt/airflow/logs/dag_id=industry_metrics_full_dag/task_id=upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
