@@ -39,7 +39,7 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-      # ✅ ダミーデータ生成（毎回用意）
+      # ✅ ダミーデータ生成
       - name: Generate dummy input data
         run: |
           mkdir -p input
@@ -129,7 +129,6 @@ jobs:
       - name: Debug DAG import errors
         run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
-      # === ログを必ず出す ===
       - name: Debug scheduler logs (full)
         run: docker compose logs airflow-scheduler || true
 
@@ -140,6 +139,13 @@ jobs:
         run: |
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
           docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
+
+      # ✅ Artifact に成果物アップロード
+      - name: Upload output as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: airflow-output
+          path: ./output/*.csv
 
       - name: Show logs
         run: docker compose logs --tail=200
