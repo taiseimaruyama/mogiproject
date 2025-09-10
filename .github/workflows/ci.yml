@@ -115,6 +115,10 @@ jobs:
           docker compose logs airflow-webserver || true
           docker compose logs airflow-scheduler || true
 
+      # ✅ ここで Connections 一覧を確認
+      - name: Debug Airflow connections (before DAG run)
+        run: docker compose exec -T airflow-webserver airflow connections list
+
       - name: Unpause DAG
         run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
