@@ -53,25 +53,32 @@ jobs:
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
-      # ✅ Connection 作成時に既存があれば削除してから再作成
+      # ✅ GCP & AWS 接続設定（Secrets利用）
       - name: Set Airflow Connections (GCP & AWS)
         run: |
           docker compose up -d airflow-webserver
           sleep 20
-          # GCP
+
+          # GCP credentials JSON を保存してコンテナにコピー
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
+          docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
+
+          # GCP connection
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete google_cloud_default || true
             airflow connections add google_cloud_default \
               --conn-type google-cloud-platform \
-              --conn-extra '{\"extra__google_cloud_platform__keyfile_dict\": ${{ secrets.GCP_CREDENTIALS }}, \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform\"}'
+              --conn-extra '{\"extra__google_cloud_platform__key_path\": \"/opt/airflow/gcp_key.json\", \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform\"}'
           "
-          # AWS
+
+          # AWS connection
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete aws_default || true
             airflow connections add aws_default \
               --conn-type aws \
               --conn-extra '{\"aws_access_key_id\": \"${{ secrets.AWS_ACCESS_KEY_ID }}\", \"aws_secret_access_key\": \"${{ secrets.AWS_SECRET_ACCESS_KEY }}\", \"region_name\": \"${{ secrets.AWS_REGION }}\"}'
           "
+
           docker compose down
 
       - name: Set Airflow Variables
