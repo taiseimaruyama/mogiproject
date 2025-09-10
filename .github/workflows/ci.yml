@@ -143,16 +143,12 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスク詳細ログ確認ステップ（修正版）
-      - name: Debug task logs (upload_retail_metrics_to_gcs)
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow tasks log industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01 || true
+      # ✅ タスクログ確認（worker のログ grep）
+      - name: Debug worker logs (upload_retail_metrics_to_gcs)
+        run: docker compose logs airflow-worker | grep "upload_retail_metrics_to_gcs" || true
 
-      - name: Debug task logs (upload_ads_metrics_to_s3)
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow tasks log industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01 || true
+      - name: Debug worker logs (upload_ads_metrics_to_s3)
+        run: docker compose logs airflow-worker | grep "upload_ads_metrics_to_s3" || true
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
@@ -168,9 +164,6 @@ jobs:
 
       - name: Debug worker logs (full)
         run: docker compose logs airflow-worker || true
-
-      - name: Debug worker logs (upload tasks)
-        run: docker compose logs airflow-worker | grep "upload_" || true
 
       - name: Check output files
         run: |
