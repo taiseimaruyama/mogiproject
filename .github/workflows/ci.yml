@@ -59,16 +59,15 @@ jobs:
           docker compose up -d airflow-webserver
           sleep 20
 
-          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
-          docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
-
+          # GCP 接続（keyfile_dict 方式）
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete google_cloud_default || true
             airflow connections add google_cloud_default \
               --conn-type google-cloud-platform \
-              --conn-extra '{\"extra__google_cloud_platform__key_path\": \"/opt/airflow/gcp_key.json\", \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform\"}'
+              --conn-extra '{\"extra__google_cloud_platform__keyfile_dict\": ${{ secrets.GCP_CREDENTIALS }}, \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform\"}'
           "
 
+          # AWS 接続（extra__ 形式で指定）
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete aws_default || true
             airflow connections add aws_default \
@@ -143,7 +142,7 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスク詳細ログ確認 (古い Airflow 用に直接ファイルを cat)
+      # ✅ タスクログ確認（古い Airflow 向けに直接 cat）
       - name: Debug task logs (upload_retail_metrics_to_gcs)
         run: |
           docker compose exec -T airflow-webserver \
@@ -172,7 +171,6 @@ jobs:
       - name: Debug worker logs (upload tasks)
         run: docker compose logs airflow-worker | grep "upload_" || true
 
-      # ✅ 追加: ワーカー詳細ログ
       - name: Debug worker logs (detailed)
         run: |
           echo "------ airflow-worker full logs ------"
