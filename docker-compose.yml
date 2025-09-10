@@ -27,7 +27,7 @@ services:
       "mkdir -p /opt/airflow/logs &&
        airflow db init &&
        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-       airflow connections add 'google_cloud_default' --conn-type 'google_cloud_platform' --conn-extra '{\"extra__google_cloud_platform__key_path\":\"/opt/airflow/gcp_credentials.json\",\"extra__google_cloud_platform__project\":\"striking-yen-470200-u3\"}' --overwrite &&
+       airflow connections add --conn-id 'google_cloud_default' --conn-type 'google_cloud_platform' --conn-extra '{\"extra__google_cloud_platform__key_path\":\"/opt/airflow/gcp_credentials.json\",\"extra__google_cloud_platform__project\":\"striking-yen-470200-u3\"}' --overwrite &&
        echo '✅ Airflow init completed'"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
