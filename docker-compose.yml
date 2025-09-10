@@ -27,17 +27,22 @@ services:
       "mkdir -p /opt/airflow/logs &&
        airflow db init &&
        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
+       airflow connections add google_cloud_default \
+         --conn-type google_cloud_platform \
+         --conn-extra '{\"extra__google_cloud_platform__key_path\":\"/opt/airflow/gcp_credentials.json\",\"extra__google_cloud_platform__project\":\"striking-yen-470200-u3\"}' &&
        echo '✅ Airflow init completed'"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
 
   airflow-webserver:
     image: apache/airflow:2.6.3
@@ -54,11 +59,13 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
     user: "50000:0"
 
   airflow-scheduler:
@@ -74,11 +81,13 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
     user: "50000:0"
 
   airflow-worker:
@@ -94,11 +103,13 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
     user: "50000:0"
 
   airflow-cli:
@@ -112,11 +123,13 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
       - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
+      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
 
 volumes:
   postgres-db-volume:
