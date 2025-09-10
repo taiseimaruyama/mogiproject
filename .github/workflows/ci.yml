@@ -44,6 +44,15 @@ jobs:
         run: |
           docker compose run --rm airflow-init
 
+      # ✅ Airflow Variables を追加
+      - name: Set Airflow Variables
+        run: |
+          docker compose up -d airflow-webserver
+          sleep 20
+          docker compose exec -T airflow-webserver \
+            airflow variables set gcs_bucket my-bucket-name
+          docker compose down
+
       - name: Start Airflow services
         run: |
           docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
