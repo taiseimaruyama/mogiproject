@@ -27,7 +27,7 @@ services:
       "mkdir -p /opt/airflow/logs &&
        airflow db init &&
        airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-       airflow connections add --conn-id 'google_cloud_default' --conn-type 'google_cloud_platform' --conn-extra '{\"extra__google_cloud_platform__key_path\":\"/opt/airflow/gcp_credentials.json\",\"extra__google_cloud_platform__project\":\"striking-yen-470200-u3\"}' --overwrite &&
+       airflow connections import /opt/airflow/connections.json &&
        echo '✅ Airflow init completed'"
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
@@ -41,6 +41,7 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+      - ./connections.json:/opt/airflow/connections.json:ro
 
   airflow-webserver:
     image: apache/airflow:2.6.3
@@ -64,6 +65,7 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+      - ./connections.json:/opt/airflow/connections.json:ro
     user: "50000:0"
 
   airflow-scheduler:
@@ -86,6 +88,7 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+      - ./connections.json:/opt/airflow/connections.json:ro
     user: "50000:0"
 
   airflow-worker:
@@ -108,6 +111,7 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+      - ./connections.json:/opt/airflow/connections.json:ro
     user: "50000:0"
 
   airflow-cli:
@@ -128,6 +132,7 @@ services:
       - ./input:/opt/airflow/input
       - ./output:/opt/airflow/output
       - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+      - ./connections.json:/opt/airflow/connections.json:ro
 
 volumes:
   postgres-db-volume:
