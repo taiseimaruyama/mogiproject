@@ -2,15 +2,15 @@ psycopg2-binary
 redis
 pytest
 
-# 必要な Airflow Providers
-apache-airflow-providers-google==10.14.0
-apache-airflow-providers-amazon==8.14.0
+# 必要な Airflow Providers（バージョン縛りを緩める）
+apache-airflow-providers-google>=10.0.0
+apache-airflow-providers-amazon>=8.0.0
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
 
-# Google Cloud SDKs
-google-cloud-storage>=2.10.0
-google-cloud-bigquery>=3.13.0
+# Google Cloud SDKs（競合回避のため Airflow が決めるバージョンに任せる）
+google-cloud-storage
+google-cloud-bigquery
 
 # Airflow が依存するバージョンを固定
 pendulum==2.1.2
