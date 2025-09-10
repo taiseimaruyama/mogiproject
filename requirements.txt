@@ -2,9 +2,9 @@ psycopg2-binary
 redis
 pytest
 
-# 必要な Airflow Providers（最小限）
-apache-airflow-providers-google>=10.0.0
-apache-airflow-providers-amazon
+# 必要な Airflow Providers
+apache-airflow-providers-google==10.14.0
+apache-airflow-providers-amazon==8.14.0
 apache-airflow-providers-postgres
 apache-airflow-providers-redis
 
