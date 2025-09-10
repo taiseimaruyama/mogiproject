@@ -59,15 +59,19 @@ jobs:
           docker compose up -d airflow-webserver
           sleep 20
 
-          # GCP 接続（keyfile_dict 方式）
+          # GCP JSON をファイルに保存してコンテナにコピー
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
+          docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
+
+          # GCP 接続 (keyfile_dict 方式, cat で安全に渡す)
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete google_cloud_default || true
             airflow connections add google_cloud_default \
               --conn-type google-cloud-platform \
-              --conn-extra '{\"extra__google_cloud_platform__keyfile_dict\": ${{ secrets.GCP_CREDENTIALS }}, \"extra__google_cloud_platform__scope\": \"https://www.googleapis.com/auth/cloud-platform\"}'
+              --conn-extra \"{\\\"extra__google_cloud_platform__keyfile_dict\\\": $(cat /opt/airflow/gcp_key.json), \\\"extra__google_cloud_platform__scope\\\": \\\"https://www.googleapis.com/auth/cloud-platform\\\"}\"
           "
 
-          # AWS 接続（extra__ 形式で指定）
+          # AWS 接続 (extra__ 形式)
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete aws_default || true
             airflow connections add aws_default \
