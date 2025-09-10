@@ -1,0 +1,10 @@
+[
+  {
+    "conn_id": "google_cloud_default",
+    "conn_type": "google_cloud_platform",
+    "extra": {
+      "extra__google_cloud_platform__key_path": "/opt/airflow/gcp_credentials.json",
+      "extra__google_cloud_platform__project": "striking-yen-470200-u3"
+    }
+  }
+]
