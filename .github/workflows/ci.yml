@@ -20,7 +20,6 @@ jobs:
         with:
           python-version: '3.9'
 
-      # ✅ pip キャッシュ
       - name: Cache pip
         uses: actions/cache@v3
         with:
@@ -41,10 +40,8 @@ jobs:
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
       - name: Run Airflow init
-        run: |
-          docker compose run --rm airflow-init
+        run: docker compose run --rm airflow-init
 
-      # ✅ Connection/Variables 確認用ログ
       - name: Debug Airflow connections & variables
         run: |
           docker compose up -d airflow-webserver
@@ -56,7 +53,6 @@ jobs:
           docker compose exec -T airflow-webserver airflow variables list
           docker compose down
 
-      # ✅ Airflow Variables を追加（Secrets）
       - name: Set Airflow Variables
         run: |
           docker compose up -d airflow-webserver
@@ -87,14 +83,13 @@ jobs:
 
       - name: Debug Airflow logs
         run: |
-          echo "=== docker compose ps ==="
           docker compose ps || true
-          echo
-          echo "=== airflow-webserver logs ==="
           docker compose logs airflow-webserver || true
-          echo
-          echo "=== airflow-scheduler logs ==="
           docker compose logs airflow-scheduler || true
+
+      # ✅ Trigger 前に Unpause
+      - name: Unpause DAG
+        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
       - name: Trigger DAG
         run: |
@@ -110,16 +105,11 @@ jobs:
             airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
 
       - name: Check task state (preprocess_ads)
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
 
       - name: Check task state (calc_ads_metrics)
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
 
-      # === 追加デバッグ ===
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
 
@@ -129,15 +119,11 @@ jobs:
       - name: Debug DAG import errors
         run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
 
-      - name: Unpause DAG
-        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
+      - name: Debug scheduler logs
+        run: docker compose logs airflow-scheduler --tail=200 || true
 
-      - name: Debug scheduler task dispatch
-        run: docker compose logs airflow-scheduler | grep "Sending task" || true
-
-      - name: Debug worker task reception
-        run: docker compose logs airflow-worker | grep "Task" || true
-      # ====================
+      - name: Debug worker logs
+        run: docker compose logs airflow-worker --tail=200 || true
 
       - name: Check output files
         run: |
