@@ -1,138 +1,81 @@
-version: '3.8'
+version: '3'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.6.3
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-default_secret_key}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./input:/opt/airflow/input
+    - ./output:/opt/airflow/output
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
 
 services:
   postgres:
     image: postgres:13
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 10s
+      interval: 5s
       retries: 5
+      start_period: 10s
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
 
   redis:
-    image: redis:latest
-
-  airflow-init:
-    image: apache/airflow:2.6.3
-    depends_on:
-      - postgres
-      - redis
-    entrypoint: bash -c
-    command: >
-      "mkdir -p /opt/airflow/logs &&
-       airflow db init &&
-       airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com &&
-       airflow connections import /opt/airflow/connections.json &&
-       echo '✅ Airflow init completed'"
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
-      - ./connections.json:/opt/airflow/connections.json:ro
+    image: redis:6
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+      start_period: 10s
 
   airflow-webserver:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
+    <<: *airflow-common
+    command: webserver
     ports:
       - "8080:8080"
-    command: webserver
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
-      - ./connections.json:/opt/airflow/connections.json:ro
-    user: "50000:0"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
 
   airflow-scheduler:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
+    <<: *airflow-common
     command: scheduler
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
-      - ./connections.json:/opt/airflow/connections.json:ro
-    user: "50000:0"
+    restart: always
 
   airflow-worker:
-    image: apache/airflow:2.6.3
-    restart: on-failure
-    depends_on:
-      - airflow-init
-      - postgres
-      - redis
+    <<: *airflow-common
     command: celery worker
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
-      - ./connections.json:/opt/airflow/connections.json:ro
-    user: "50000:0"
+    restart: always
 
-  airflow-cli:
-    image: apache/airflow:2.6.3
-    entrypoint: ["/bin/bash", "-c"]
-    command: |
-      mkdir -p /opt/airflow/logs
-      exec airflow
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres/airflow
-      - GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./input:/opt/airflow/input
-      - ./output:/opt/airflow/output
-      - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
-      - ./connections.json:/opt/airflow/connections.json:ro
+  airflow-init:
+    <<: *airflow-common
+    command: bash -c "airflow db init && airflow users create --username airflow --password airflow --firstname Air --lastname Flow --role Admin --email admin@example.com"
+    restart: "no"
 
 volumes:
   postgres-db-volume:
