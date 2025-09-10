@@ -74,6 +74,27 @@ jobs:
             airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
           docker compose down
 
+      # ✅ GCP/AWS Connections を設定
+      - name: Set Airflow Connections (GCP & AWS)
+        run: |
+          docker compose up -d airflow-webserver
+          sleep 20
+          # GCP 接続
+          docker compose exec -T airflow-webserver \
+            airflow connections add 'google_cloud_default' \
+            --conn-type 'google_cloud_platform' \
+            --conn-extra '{"extra__google_cloud_platform__keyfile_dict":${{ secrets.GCP_CREDENTIALS }},"extra__google_cloud_platform__project":"striking-yen-470200-u3"}'
+          
+          # AWS 接続
+          docker compose exec -T airflow-webserver \
+            airflow connections add 'aws_default' \
+            --conn-type 'aws' \
+            --conn-login "${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --conn-password "${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --conn-extra "{\"region_name\":\"${{ secrets.AWS_REGION }}\"}"
+
+          docker compose down
+
       - name: Start Airflow services
         run: |
           docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
