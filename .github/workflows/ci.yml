@@ -143,12 +143,16 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスクログ確認（worker のログ grep）
-      - name: Debug worker logs (upload_retail_metrics_to_gcs)
-        run: docker compose logs airflow-worker | grep "upload_retail_metrics_to_gcs" || true
+      # ✅ タスク詳細ログ確認
+      - name: Debug task logs (upload_retail_metrics_to_gcs)
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow tasks logs industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01 || true
 
-      - name: Debug worker logs (upload_ads_metrics_to_s3)
-        run: docker compose logs airflow-worker | grep "upload_ads_metrics_to_s3" || true
+      - name: Debug task logs (upload_ads_metrics_to_s3)
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow tasks logs industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01 || true
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
@@ -164,6 +168,17 @@ jobs:
 
       - name: Debug worker logs (full)
         run: docker compose logs airflow-worker || true
+
+      - name: Debug worker logs (upload tasks)
+        run: docker compose logs airflow-worker | grep "upload_" || true
+
+      # ✅ 追加: ワーカー詳細ログ
+      - name: Debug worker logs (detailed)
+        run: |
+          echo "------ airflow-worker full logs ------"
+          docker compose logs airflow-worker || true
+          echo "------ last 300 lines ------"
+          docker compose logs --tail=300 airflow-worker || true
 
       - name: Check output files
         run: |
