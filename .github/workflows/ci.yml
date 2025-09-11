@@ -10,13 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env: # ✅ Secrets をコンテナにそのまま渡す
-      GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
@@ -65,9 +58,9 @@ jobs:
           docker compose up -d airflow-webserver
           sleep 20
           docker compose exec -T airflow-webserver \
-            airflow variables set gcs_bucket $GCS_BUCKET
+            airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
           docker compose exec -T airflow-webserver \
-            airflow variables set s3_bucket $S3_BUCKET
+            airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
           docker compose down
 
       - name: Start Airflow services
@@ -94,7 +87,7 @@ jobs:
           docker compose logs airflow-webserver || true
           docker compose logs airflow-scheduler || true
 
-      - name: Debug Airflow connections (check env-based)
+      - name: Debug Airflow connections (before DAG run)
         run: docker compose exec -T airflow-webserver airflow connections list
 
       - name: Unpause DAG
@@ -125,16 +118,16 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスクログ確認（worker のログファイルを直接 cat）
+      # ✅ タスクログ確認（find で実際のパスを探す）
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
         run: |
           docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
+            sh -c "find /opt/airflow/logs -type f | grep upload_retail_metrics_to_gcs | xargs -r tail -n 50"
 
       - name: Debug task logs (upload_ads_metrics_to_s3 from worker)
         run: |
           docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
+            sh -c "find /opt/airflow/logs -type f | grep upload_ads_metrics_to_s3 | xargs -r tail -n 50"
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
