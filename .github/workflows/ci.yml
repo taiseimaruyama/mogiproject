@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9"
+          python-version: '3.9'
 
       - name: Cache pip
         uses: actions/cache@v3
@@ -27,157 +27,137 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
       - name: Upgrade pip
         run: python -m pip install --upgrade pip setuptools wheel
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ---------------------------
-      # Airflow用ディレクトリ準備
-      # ---------------------------
       - name: Initialize Airflow directories
         run: |
-          mkdir -p ./dags ./logs ./plugins ./input ./output
-
-      # ---------------------------
-      # GCP 認証キーをSecretsから展開
-      # ---------------------------
-      - name: Write gcp_credentials.json
-        run: |
-          echo '${{ secrets.GCP_CREDENTIALS_JSON }}' > gcp_credentials.json
-
-      # ---------------------------
-      # .envファイル作成
-      # ---------------------------
-      - name: Write .env file
-        run: |
-          echo "AIRFLOW_UID=50000" >> .env
-          echo "AIRFLOW_GID=0" >> .env
-          echo "GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json" >> .env
-          echo "GCS_BUCKET=my-gcs-bucket-2025-demo" >> .env
-          echo "S3_BUCKET=domoproject" >> .env
-          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
-          echo "AIRFLOW__CORE__LOAD_EXAMPLES=False" >> .env
-
-      # ---------------------------
-      # ダミーデータ生成
-      # ---------------------------
+          sudo mkdir -p ./logs ./dags ./plugins ./input ./output
+          sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
+      # ✅ ダミーデータ生成
       - name: Generate dummy input data
         run: |
           mkdir -p input
-          echo "date,sales,stock" > input/retail.csv
-          echo "2025-01-01,100,10" >> input/retail.csv
-          echo "2025-01-02,150,0" >> input/retail.csv
-          echo "2025-01-03,200,5" >> input/retail.csv
-
-          echo "impressions,clicks,spend,revenue" > input/ads.csv
-          echo "1000,50,200,400" >> input/ads.csv
-          echo "2000,30,300,200" >> input/ads.csv
-
-      # ---------------------------
-      # Airflow Init
-      # ---------------------------
-      - name: Run Airflow init
+          echo "date,product,sales,stock" > input/retail.csv
+          echo "2025-01-01,A,100,10" >> input/retail.csv
+          echo "2025-01-02,A,120,0" >> input/retail.csv
+          echo "date,impressions,clicks,spend,revenue" > input/ads.csv
+          echo "2025-01-01,1000,50,200,500" >> input/ads.csv
+          echo "2025-01-02,800,20,100,150" >> input/ads.csv
+      # ✅ GCP 認証 JSON をファイル化
+      - name: Write .env file
         run: |
-          docker compose run --rm \
-            -e GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp_credentials.json \
-            -e AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }} \
-            -e GCS_BUCKET=my-gcs-bucket-2025-demo \
-            -e S3_BUCKET=domoproject \
-            -v ${{ github.workspace }}/gcp_credentials.json:/opt/airflow/gcp_credentials.json \
-            airflow-init
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
+      - name: Run Airflow init
+        run: docker compose run --rm airflow-init
 
-      # ---------------------------
-      # Airflow サービス起動
-      # ---------------------------
       - name: Start Airflow services
-        run: docker compose up -d
-
+        env:
+          AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
       - name: Wait for Airflow webserver
         run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep -q '"status":"healthy"'; then
-              echo "Airflow webserver is healthy"
+          for i in {1..90}; do
+            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q "healthy"; then
+              echo "Airflow is healthy!"
               exit 0
             fi
-            echo "Waiting for Airflow..."
+            echo "Waiting for Airflow... ($i/90)"
             sleep 10
           done
+          echo "Airflow did not become healthy in time."
+          docker compose logs
           exit 1
-
-      # ---------------------------
-      # Debug Logs
-      # ---------------------------
+      # ✅ デバッグログ確認
       - name: Debug Airflow logs
-        run: docker compose logs airflow-webserver | tail -n 200 || true
-
+        run: |
+          docker compose ps || true
+          docker compose logs airflow-webserver || true
+          docker compose logs airflow-scheduler || true
       - name: Debug Airflow connections (before DAG run)
-        run: docker compose exec -T airflow-webserver airflow connections list || true
+        run: docker compose exec -T airflow-webserver airflow connections list
 
-      # ---------------------------
-      # DAG実行
-      # ---------------------------
       - name: Unpause DAG
         run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
       - name: Trigger DAG
-        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag
-
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger -e 2025-01-01 industry_metrics_full_dag
       - name: Wait after trigger
-        run: sleep 60
+        run: sleep 30
 
       - name: Check DAG runs
-        run: docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag
-
-      # ---------------------------
-      # Taskごとの確認
-      # ---------------------------
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
       - name: Check task state (preprocess_ads)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01 || true
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
 
       - name: Check task state (calc_ads_metrics)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01 || true
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
 
       - name: Check task state (upload_ads_metrics_to_s3)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01 || true
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01
 
       - name: Check task state (upload_retail_metrics_to_gcs)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01 || true
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ---------------------------
-      # Workerログの詳細
-      # ---------------------------
+      # ✅ タスクログ確認（worker 側）
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
-        run: docker compose exec -T airflow-worker cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01/1.log || true
-
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
       - name: Debug task logs (upload_ads_metrics_to_s3 from worker)
-        run: docker compose exec -T airflow-worker cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01/1.log || true
-
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
       - name: Debug DAG list
-        run: docker compose exec -T airflow-webserver airflow dags list || true
+        run: docker compose exec -T airflow-scheduler airflow dags list
 
-      - name: Debug task list
-        run: docker compose exec -T airflow-webserver airflow tasks list industry_metrics_full_dag || true
+      - name: Debug tasks list
+        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
 
-      # ---------------------------
-      # Outputファイル確認
-      # ---------------------------
+      - name: Debug DAG import errors
+        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
+
+      - name: Debug scheduler logs (full)
+        run: docker compose logs airflow-scheduler || true
+
+      - name: Debug worker logs (full)
+        run: docker compose logs airflow-worker || true
+
+      - name: Debug worker logs (upload tasks)
+        run: docker compose logs airflow-worker | grep "upload_" || true
+
+      - name: Debug worker logs (detailed)
+        run: |
+          echo "------ airflow-worker full logs ------"
+          docker compose logs airflow-worker || true
+          echo "------ last 300 lines ------"
+          docker compose logs --tail=300 airflow-worker || true
       - name: Check output files
-        run: ls -l output || true
-
+        run: |
+          docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
+          docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
       - name: Upload output as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: output-csv
-          path: output/*.csv
+          name: airflow-output
+          path: ./output/*.csv
 
-      # ---------------------------
-      # Stop Services
-      # ---------------------------
       - name: Show logs
-        run: docker compose logs --tail=200 || true
+        run: docker compose logs --tail=200
 
       - name: Shutdown
+        if: always()
         run: docker compose down
