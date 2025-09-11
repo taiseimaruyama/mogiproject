@@ -1,42 +1,4 @@
-version: '3'
-
-x-airflow-common:
-  &airflow-common
-  image: apache/airflow:2.6.3
-  environment:
-    &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
-    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-default_secret_key}
-
-    # ✅ AWS/GCP Secrets
-    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-    AWS_REGION: ${AWS_REGION}
-    GCS_BUCKET: ${GCS_BUCKET}
-    S3_BUCKET: ${S3_BUCKET}
-    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-credentials.json
-
-  volumes:
-    - ./dags:/opt/airflow/dags
-    - ./logs:/opt/airflow/logs
-    - ./plugins:/opt/airflow/plugins
-    - ./input:/opt/airflow/input
-    - ./output:/opt/airflow/output
-    - ./gcp-credentials.json:/opt/airflow/gcp-credentials.json:ro   # ✅ 追加
-
-  user: "${AIRFLOW_UID:-50000}:0"
-  depends_on:
-    redis:
-      condition: service_healthy
-    postgres:
-      condition: service_healthy
+version: '3.9'
 
 services:
   postgres:
@@ -45,48 +7,122 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 5s
-      retries: 5
-      start_period: 10s
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
 
   redis:
-    image: redis:6
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 5
-      start_period: 10s
+    image: redis:latest
+    ports:
+      - "6379:6379"
 
   airflow-webserver:
-    <<: *airflow-common
-    command: webserver
+    image: apache/airflow:2.7.3
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp_credentials.json
+      GCS_BUCKET: ${GCS_BUCKET}
+      S3_BUCKET: ${S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./gcp-credentials.json:/opt/airflow/gcp_credentials.json:ro
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    restart: always
+    command: webserver
 
   airflow-scheduler:
-    <<: *airflow-common
-    command: scheduler
+    image: apache/airflow:2.7.3
     restart: always
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp_credentials.json
+      GCS_BUCKET: ${GCS_BUCKET}
+      S3_BUCKET: ${S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./gcp-credentials.json:/opt/airflow/gcp_credentials.json:ro
+    command: scheduler
 
   airflow-worker:
-    <<: *airflow-common
-    command: celery worker
+    image: apache/airflow:2.7.3
     restart: always
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp_credentials.json
+      GCS_BUCKET: ${GCS_BUCKET}
+      S3_BUCKET: ${S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./gcp-credentials.json:/opt/airflow/gcp_credentials.json:ro
+    command: celery worker
 
   airflow-init:
-    <<: *airflow-common
-    command: bash -c "airflow db init && airflow users create --username airflow --password airflow --firstname Air --lastname Flow --role Admin --email admin@example.com"
-    restart: "no"
+    image: apache/airflow:2.7.3
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp_credentials.json
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./input:/opt/airflow/input
+      - ./output:/opt/airflow/output
+      - ./gcp-credentials.json:/opt/airflow/gcp_credentials.json:ro
+    command: bash -c "airflow db init && airflow users create \
+                      --username admin --password admin \
+                      --firstname Admin --lastname User \
+                      --role Admin --email admin@example.com"
 
 volumes:
   postgres-db-volume:
