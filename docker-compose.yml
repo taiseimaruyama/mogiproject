@@ -3,27 +3,16 @@ version: '3'
 x-airflow-common:
   &airflow-common
   image: apache/airflow:2.6.3
+  env_file: .env   # ✅ Secrets を全サービスに読み込む
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
-    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-default_secret_key}
-
-    # ✅ AWS Secrets
-    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-    AWS_REGION: ${AWS_REGION}
-    S3_BUCKET: ${S3_BUCKET}
-
-    # ✅ GCP Secrets
-    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-key.json
-    GCS_BUCKET: ${GCS_BUCKET}
 
   volumes:
     - ./dags:/opt/airflow/dags
@@ -31,7 +20,6 @@ x-airflow-common:
     - ./plugins:/opt/airflow/plugins
     - ./input:/opt/airflow/input
     - ./output:/opt/airflow/output
-    - ./gcp-key.json:/opt/airflow/gcp-key.json  # ✅ GCP 認証ファイルをマウント
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     redis:
