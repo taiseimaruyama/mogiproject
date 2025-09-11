@@ -21,9 +21,7 @@ x-airflow-common:
     AWS_REGION: ${AWS_REGION}
     GCS_BUCKET: ${GCS_BUCKET}
     S3_BUCKET: ${S3_BUCKET}
-
-    # ✅ GCP 認証ファイルをマウント
-    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp_credentials.json
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-credentials.json
 
   volumes:
     - ./dags:/opt/airflow/dags
@@ -31,7 +29,8 @@ x-airflow-common:
     - ./plugins:/opt/airflow/plugins
     - ./input:/opt/airflow/input
     - ./output:/opt/airflow/output
-    - ./gcp_credentials.json:/opt/airflow/gcp_credentials.json:ro
+    - ./gcp-credentials.json:/opt/airflow/gcp-credentials.json:ro   # ✅ 追加
+
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     redis:
