@@ -10,6 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env: # ✅ Secrets をコンテナにそのまま渡す
+      GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
@@ -53,42 +60,14 @@ jobs:
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
-      # ✅ GCP & AWS 接続設定（Secrets利用）
-      - name: Set Airflow Connections (GCP & AWS)
-        run: |
-          docker compose up -d airflow-webserver
-          sleep 20
-
-          # GCP JSON をファイルに保存してコンテナにコピー
-          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
-          docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
-
-          # GCP 接続
-          docker compose exec -T airflow-webserver bash -c "
-            airflow connections delete google_cloud_default || true
-            airflow connections add google_cloud_default \
-              --conn-type google-cloud-platform \
-              --conn-extra \"{\\\"extra__google_cloud_platform__keyfile_dict\\\": $(cat /opt/airflow/gcp_key.json), \\\"extra__google_cloud_platform__scope\\\": \\\"https://www.googleapis.com/auth/cloud-platform\\\"}\"
-          "
-
-          # AWS 接続
-          docker compose exec -T airflow-webserver bash -c "
-            airflow connections delete aws_default || true
-            airflow connections add aws_default \
-              --conn-type aws \
-              --conn-extra '{\"extra__aws_access_key_id\": \"${{ secrets.AWS_ACCESS_KEY_ID }}\", \"extra__aws_secret_access_key\": \"${{ secrets.AWS_SECRET_ACCESS_KEY }}\", \"region_name\": \"${{ secrets.AWS_REGION }}\"}'
-          "
-
-          docker compose down
-
       - name: Set Airflow Variables
         run: |
           docker compose up -d airflow-webserver
           sleep 20
           docker compose exec -T airflow-webserver \
-            airflow variables set gcs_bucket ${{ secrets.GCS_BUCKET }}
+            airflow variables set gcs_bucket $GCS_BUCKET
           docker compose exec -T airflow-webserver \
-            airflow variables set s3_bucket ${{ secrets.S3_BUCKET }}
+            airflow variables set s3_bucket $S3_BUCKET
           docker compose down
 
       - name: Start Airflow services
@@ -115,7 +94,7 @@ jobs:
           docker compose logs airflow-webserver || true
           docker compose logs airflow-scheduler || true
 
-      - name: Debug Airflow connections (before DAG run)
+      - name: Debug Airflow connections (check env-based)
         run: docker compose exec -T airflow-webserver airflow connections list
 
       - name: Unpause DAG
