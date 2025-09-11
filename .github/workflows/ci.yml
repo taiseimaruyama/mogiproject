@@ -114,6 +114,10 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
+      # ✅ Airflow Variables を確認
+      - name: Debug Airflow variables
+        run: docker compose exec -T airflow-webserver airflow variables list
+
       # ✅ タスクログ確認（worker 側）
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
         run: |
