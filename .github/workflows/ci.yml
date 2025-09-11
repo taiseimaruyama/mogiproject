@@ -39,6 +39,17 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
+      # ✅ Secrets を .env に書き出し
+      - name: Write .env file
+        run: |
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "GCP_CREDENTIALS=${{ secrets.GCP_CREDENTIALS }}" >> .env
+          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
+
       # ✅ ダミーデータ生成
       - name: Generate dummy input data
         run: |
@@ -50,25 +61,11 @@ jobs:
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
-      # ✅ GCP Credentials をファイル化
-      - name: Write GCP credentials file
-        run: |
-          echo "${{ secrets.GCP_CREDENTIALS }}" > gcp-key.json
-        shell: bash
-
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
       - name: Start Airflow services
-        env:
-          AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-        run: |
-          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+        run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
       - name: Wait for Airflow webserver
         run: |
@@ -84,7 +81,7 @@ jobs:
           docker compose logs
           exit 1
 
-      # ✅ Debug Logs
+      # ✅ デバッグログ確認
       - name: Debug Airflow logs
         run: |
           docker compose ps || true
