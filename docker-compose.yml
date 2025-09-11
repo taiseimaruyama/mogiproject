@@ -15,13 +15,15 @@ x-airflow-common:
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-default_secret_key}
 
-    # ✅ AWS/GCP Secrets を環境変数で渡す
+    # ✅ AWS Secrets
     AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
     AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
     AWS_REGION: ${AWS_REGION}
-    GCP_CREDENTIALS: ${GCP_CREDENTIALS}
-    GCS_BUCKET: ${GCS_BUCKET}
     S3_BUCKET: ${S3_BUCKET}
+
+    # ✅ GCP Secrets
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-key.json
+    GCS_BUCKET: ${GCS_BUCKET}
 
   volumes:
     - ./dags:/opt/airflow/dags
@@ -29,6 +31,7 @@ x-airflow-common:
     - ./plugins:/opt/airflow/plugins
     - ./input:/opt/airflow/input
     - ./output:/opt/airflow/output
+    - ./gcp-key.json:/opt/airflow/gcp-key.json  # ✅ GCP 認証ファイルをマウント
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     redis:
