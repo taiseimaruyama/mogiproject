@@ -53,17 +53,15 @@ jobs:
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
-      # ✅ GCP & AWS 接続設定（Secrets利用）
+      # ✅ GCP & AWS 接続設定
       - name: Set Airflow Connections (GCP & AWS)
         run: |
           docker compose up -d airflow-webserver
           sleep 20
 
-          # GCP JSON をファイルに保存してコンテナにコピー
           echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
           docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
 
-          # GCP 接続 (keyfile_dict 方式)
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete google_cloud_default || true
             airflow connections add google_cloud_default \
@@ -71,7 +69,6 @@ jobs:
               --conn-extra \"{\\\"extra__google_cloud_platform__keyfile_dict\\\": $(cat /opt/airflow/gcp_key.json), \\\"extra__google_cloud_platform__scope\\\": \\\"https://www.googleapis.com/auth/cloud-platform\\\"}\"
           "
 
-          # AWS 接続
           docker compose exec -T airflow-webserver bash -c "
             airflow connections delete aws_default || true
             airflow connections add aws_default \
@@ -146,16 +143,16 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ Worker 側からタスクログを直接確認
+      # ✅ Worker 側から正しいパスでタスクログを確認
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
         run: |
           docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/dag_id=industry_metrics_full_dag/task_id=upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
+            cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Debug task logs (upload_ads_metrics_to_s3 from worker)
         run: |
           docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/dag_id=industry_metrics_full_dag/task_id=upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
+            cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Show DAG tree
         run: docker compose exec -T airflow-webserver airflow tasks list industry_metrics_full_dag --tree
