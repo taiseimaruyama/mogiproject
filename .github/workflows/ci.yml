@@ -50,6 +50,12 @@ jobs:
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
+      # ✅ GCP Credentials をファイル化
+      - name: Write GCP credentials file
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS }}" > gcp-key.json
+        shell: bash
+
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
@@ -59,7 +65,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
         run: |
@@ -79,7 +84,7 @@ jobs:
           docker compose logs
           exit 1
 
-      # ✅ デバッグログ確認
+      # ✅ Debug Logs
       - name: Debug Airflow logs
         run: |
           docker compose ps || true
