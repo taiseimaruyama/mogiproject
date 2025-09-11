@@ -116,14 +116,14 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ds }}/retail_metrics.csv",
+        dst="retail_metrics.csv",   # ✅ 修正済み: GCSの実ファイル名に合わせる
         bucket=GCS_BUCKET,
     )
 
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/{{ ds }}/retail_metrics.csv"],
+        source_objects=["retail_metrics.csv"],   # ✅ 修正済み
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",  # 常に上書き
