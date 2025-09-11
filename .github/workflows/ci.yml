@@ -39,16 +39,20 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-      # ✅ Secrets を .env に書き出し
+      # ✅ Secrets を .env に安全に書き込む
       - name: Write .env file
         run: |
-          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          {
+            echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}"
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}"
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            echo "AWS_REGION=${{ secrets.AWS_REGION }}"
+            echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}"
+            echo "S3_BUCKET=${{ secrets.S3_BUCKET }}"
+          } > .env
+
+          # GCP_CREDENTIALS は base64 済みを想定して保存
           echo "GCP_CREDENTIALS=${{ secrets.GCP_CREDENTIALS }}" >> .env
-          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
-          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
 
       # ✅ ダミーデータ生成
       - name: Generate dummy input data
