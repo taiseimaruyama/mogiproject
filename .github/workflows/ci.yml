@@ -39,17 +39,6 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-      # ✅ .envファイルにSecrets書き込み（方法B）
-      - name: Write .env file
-        run: |
-          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
-          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
-          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
-          echo "GCP_CREDENTIALS=${{ secrets.GCP_CREDENTIALS }}" >> .env
-
       # ✅ ダミーデータ生成
       - name: Generate dummy input data
         run: |
@@ -60,6 +49,17 @@ jobs:
           echo "date,impressions,clicks,spend,revenue" > input/ads.csv
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
+
+      # ✅ Secrets を .env に書き込む（GCP JSONは一行化）
+      - name: Write .env file
+        run: |
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
+          echo "GCP_CREDENTIALS=$(echo '${{ secrets.GCP_CREDENTIALS }}' | jq -c .)" >> .env
 
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
