@@ -39,7 +39,7 @@ jobs:
           sudo mkdir -p ./logs ./dags ./plugins ./input ./output
           sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-      # ✅ .env ファイルにSecretsを書き込む
+      # ✅ .envファイルにSecrets書き込み（方法B）
       - name: Write .env file
         run: |
           echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
@@ -48,7 +48,7 @@ jobs:
           echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
           echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
           echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
-          echo "GCP_CREDENTIALS=$(echo '${{ secrets.GCP_CREDENTIALS }}' | base64 -d)" >> .env
+          echo "GCP_CREDENTIALS=${{ secrets.GCP_CREDENTIALS }}" >> .env
 
       # ✅ ダミーデータ生成
       - name: Generate dummy input data
