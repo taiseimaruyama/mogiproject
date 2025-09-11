@@ -50,10 +50,17 @@ jobs:
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
-      # ✅ GCP Credentials をファイル化
+      # ✅ GCP 認証 JSON をファイル化
       - name: Write .env file
         run: |
-          echo "${{ secrets.GCP_CREDENTIALS }}" > gcp_credentials.json
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
+          # GCP 認証 JSON をファイル出力
+          echo "${{ secrets.GCP_CREDENTIALS }}" > ./gcp-credentials.json
 
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
@@ -66,6 +73,7 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp-credentials.json
         run: |
           docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
