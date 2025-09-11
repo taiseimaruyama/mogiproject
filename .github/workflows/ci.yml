@@ -50,22 +50,24 @@ jobs:
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
-      # ✅ Secrets を .env に書き込む（GCP JSONは一行化）
-      - name: Write .env file
+      # ✅ GCP Credentials をファイルに保存
+      - name: Write GCP credentials file
         run: |
-          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
-          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
-          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
-          echo "GCP_CREDENTIALS=$(echo '${{ secrets.GCP_CREDENTIALS }}' | jq -c .)" >> .env
+          echo "${{ secrets.GCP_CREDENTIALS }}" > gcp_credentials.json
 
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
       - name: Start Airflow services
-        run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+        env:
+          AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
       - name: Wait for Airflow webserver
         run: |
@@ -81,13 +83,6 @@ jobs:
           docker compose logs
           exit 1
 
-      # ✅ デバッグログ確認
-      - name: Debug Airflow logs
-        run: |
-          docker compose ps || true
-          docker compose logs airflow-webserver || true
-          docker compose logs airflow-scheduler || true
-
       - name: Debug Airflow connections (before DAG run)
         run: docker compose exec -T airflow-webserver airflow connections list
 
@@ -102,59 +97,6 @@ jobs:
       - name: Wait after trigger
         run: sleep 30
 
-      - name: Check DAG runs
-        run: |
-          docker compose exec -T airflow-webserver \
-            airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
-
-      - name: Check task state (preprocess_ads)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
-
-      - name: Check task state (calc_ads_metrics)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
-
-      - name: Check task state (upload_ads_metrics_to_s3)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01
-
-      - name: Check task state (upload_retail_metrics_to_gcs)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
-
-      # ✅ タスクログ確認（worker 側）
-      - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
-        run: |
-          docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
-
-      - name: Debug task logs (upload_ads_metrics_to_s3 from worker)
-        run: |
-          docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
-
-      - name: Debug DAG list
-        run: docker compose exec -T airflow-scheduler airflow dags list
-
-      - name: Debug tasks list
-        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
-
-      - name: Debug DAG import errors
-        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
-
-      - name: Debug scheduler logs (full)
-        run: docker compose logs airflow-scheduler || true
-
-      - name: Debug worker logs (full)
-        run: docker compose logs airflow-worker || true
-
-      - name: Debug worker logs (upload tasks)
-        run: docker compose logs airflow-worker | grep "upload_" || true
-
-      - name: Debug worker logs (detailed)
-        run: |
-          echo "------ airflow-worker full logs ------"
-          docker compose logs airflow-worker || true
-          echo "------ last 300 lines ------"
-          docker compose logs --tail=300 airflow-worker || true
-
       - name: Check output files
         run: |
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
@@ -165,9 +107,6 @@ jobs:
         with:
           name: airflow-output
           path: ./output/*.csv
-
-      - name: Show logs
-        run: docker compose logs --tail=200
 
       - name: Shutdown
         if: always()
