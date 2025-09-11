@@ -58,9 +58,15 @@ jobs:
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
-      # ✅ Airflow サービス起動（envはdocker-compose.ymlに記載済み）
+      # ✅ Airflow サービス起動（Secrets を env 経由で渡す）
       - name: Start Airflow services
         run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
 
       - name: Wait for Airflow webserver
         run: |
@@ -114,7 +120,7 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ Airflow Variables を確認
+      # ✅ Airflow Variables 確認（今後は空のはず）
       - name: Debug Airflow variables
         run: docker compose exec -T airflow-webserver airflow variables list
 
