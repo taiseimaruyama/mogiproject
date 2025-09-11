@@ -50,24 +50,24 @@ jobs:
           echo "2025-01-01,1000,50,200,500" >> input/ads.csv
           echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
-      # ✅ GCP 認証 JSON をファイル化
+      # ✅ .env を作成して Secrets 渡す
       - name: Write .env file
         run: |
-          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
+
+          # GCP認証キーをJSONとして保存
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_key.json
 
       - name: Run Airflow init
-        run: docker compose run --rm airflow-init
+        run: docker compose run --rm --env-file .env airflow-init
 
       - name: Start Airflow services
-        env:
-          AIRFLOW__CORE__FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-        run: |
-          docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
+        run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
       - name: Wait for Airflow webserver
         run: |
@@ -83,7 +83,21 @@ jobs:
           docker compose logs
           exit 1
 
-      # ✅ デバッグログ確認
+      # ✅ Airflow に GCP Connection を追加
+      - name: Set up GCP connection
+        run: |
+          docker compose cp gcp_key.json airflow-webserver:/opt/airflow/gcp_key.json
+          docker compose cp gcp_key.json airflow-scheduler:/opt/airflow/gcp_key.json
+          docker compose cp gcp_key.json airflow-worker:/opt/airflow/gcp_key.json
+
+          docker compose exec -T airflow-webserver airflow connections add google_cloud_default \
+            --conn-type google_cloud_platform \
+            --conn-extra '{
+              "extra__google_cloud_platform__key_path": "/opt/airflow/gcp_key.json",
+              "extra__google_cloud_platform__scope": "https://www.googleapis.com/auth/cloud-platform"
+            }'
+
+      # ✅ デバッグ用ログ
       - name: Debug Airflow logs
         run: |
           docker compose ps || true
@@ -121,7 +135,6 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ タスクログ確認（worker 側）
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
         run: |
           docker compose exec -T airflow-worker \
