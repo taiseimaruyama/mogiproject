@@ -24,11 +24,12 @@ BQ_PROJECT = "striking-yen-470200-u3"
 BQ_DATASET = "analytics_dataset"
 BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 
-# ファイル名ユーティリティ（年+日付+時刻入り）
-def dated_filename(prefix, suffix, ds=None):
-    if ds is None:
-        ds = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
+# タイムスタンプ（Airflow 実行開始ごとに共通化）
+RUN_TS = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# ファイル名ユーティリティ
+def dated_filename(prefix, suffix):
+    return os.path.join(OUTPUT_DIR, f"{prefix}_{RUN_TS}{suffix}")
 
 # ---------- Retail: 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
@@ -112,14 +113,14 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ds }}/retail_metrics.csv",
+        dst=f"metrics/{RUN_TS}/retail_metrics_{RUN_TS}.csv",   # ✅ 日付時刻入り
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/{{ ds }}/retail_metrics.csv"],
+        source_objects=[f"metrics/{RUN_TS}/retail_metrics_{RUN_TS}.csv"],  # ✅ 日付時刻入り
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
@@ -135,7 +136,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ ds }}/ads_metrics.csv",
+        dest_key=f"metrics/{RUN_TS}/ads_metrics_{RUN_TS}.csv",   # ✅ 日付時刻入り
         dest_bucket=S3_BUCKET,
         replace=True,
     )
