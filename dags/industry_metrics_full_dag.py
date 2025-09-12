@@ -14,8 +14,9 @@ INPUT_DIR = "/opt/airflow/input"
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# GCS / S3 バケット
+# GCS バケット
 GCS_BUCKET = Variable.get("gcs_bucket", default_var="my-gcs-bucket-2025-demo")
+# S3 バケット
 S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
 
 # BigQuery の設定
@@ -23,23 +24,23 @@ BQ_PROJECT = "striking-yen-470200-u3"
 BQ_DATASET = "analytics_dataset"
 BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 
-# ---------- ユーティリティ: ローカル出力ファイル名 ----------
-def dated_filename(prefix, suffix, ts=None):
-    if ts is None:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(OUTPUT_DIR, f"{prefix}_{ts}{suffix}")
+# ---------- Utility: 出力ファイル名 ----------
+def dated_filename(prefix, suffix, ds=None):
+    if ds is None:
+        ds = datetime.now().strftime("%Y-%m-%d")
+    return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
 
 # ---------- Retail: 前処理 ----------
-def preprocess_retail(ds=None, ts=None, **kwargs):
+def preprocess_retail(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
     df.loc[df["stock"] < 0, "stock"] = 0
-    out_path = dated_filename("retail_clean", ".csv")
+    out_path = dated_filename("retail_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Retail: KPI ----------
-def calc_retail_metrics(ds=None, ts=None, **kwargs):
-    df = pd.read_csv(dated_filename("retail_clean", ".csv"), parse_dates=["date"])
+def calc_retail_metrics(ds=None, **kwargs):
+    df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
     total_days = df["date"].nunique()
     stockouts = df[df["stock"] == 0]
     stockout_days = stockouts["date"].nunique()
@@ -48,32 +49,33 @@ def calc_retail_metrics(ds=None, ts=None, **kwargs):
     metrics = {
         "total_days": total_days,
         "stockout_days": stockout_days,
-        "stockout_rate": stockout_days / total_days,
-        "lost_sales_estimate": avg_sales * stockout_days,
+        "stockout_rate": stockout_days / total_days if total_days > 0 else 0,
+        "lost_sales_estimate": avg_sales * stockout_days if avg_sales else 0,
     }
-    out_path = dated_filename("retail_metrics", ".csv")
+    out_path = dated_filename("retail_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
 # ---------- Ads: 前処理 ----------
-def preprocess_ads(ds=None, ts=None, **kwargs):
+def preprocess_ads(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = dated_filename("ads_clean", ".csv")
+    out_path = dated_filename("ads_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Ads: KPI ----------
-def calc_ads_metrics(ds=None, ts=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv"))
+def calc_ads_metrics(ds=None, **kwargs):
+    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
     metrics = {
         "avg_CTR": df["CTR"].mean(),
         "avg_ROAS": df["ROAS"].mean(),
     }
-    out_path = dated_filename("ads_metrics", ".csv")
+    out_path = dated_filename("ads_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
+
 
 # ---------- DAG 設定 ----------
 default_args = {
@@ -101,44 +103,53 @@ with DAG(
         exists_ok=True,
     )
 
-    # Retail pipeline
+    # ---------- Retail pipeline ----------
     retail_preprocess = PythonOperator(
-        task_id="preprocess_retail", python_callable=preprocess_retail
+        task_id="preprocess_retail",
+        python_callable=preprocess_retail,
     )
+
     retail_metrics = PythonOperator(
-        task_id="calc_retail_metrics", python_callable=calc_retail_metrics
+        task_id="calc_retail_metrics",
+        python_callable=calc_retail_metrics,
     )
+
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ts_nodash }}/retail_metrics_{{ ts_nodash }}.csv",   # ✅ 日付時刻入り
+        dst="metrics/retail_metrics_{{ ts_nodash }}.csv",  # 一意なファイル名
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
+
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/{{ ts_nodash }}/retail_metrics_{{ ts_nodash }}.csv"],  # ✅ 日付時刻入り
-        destination_project_dataset_table=BQ_TABLE,  # ✅ 常に上書き
+        source_objects=["metrics/retail_metrics_{{ ts_nodash }}.csv"],
+        destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
-        write_disposition="WRITE_TRUNCATE",
+        write_disposition="WRITE_TRUNCATE",  # 常に上書き
     )
 
-    # Ads pipeline
+    # ---------- Ads pipeline ----------
     ads_preprocess = PythonOperator(
-        task_id="preprocess_ads", python_callable=preprocess_ads
+        task_id="preprocess_ads",
+        python_callable=preprocess_ads,
     )
+
     ads_metrics = PythonOperator(
-        task_id="calc_ads_metrics", python_callable=calc_ads_metrics
+        task_id="calc_ads_metrics",
+        python_callable=calc_ads_metrics,
     )
+
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ ts_nodash }}/ads_metrics_{{ ts_nodash }}.csv",  # ✅ 日付時刻入り
+        dest_key="metrics/ads_metrics_{{ ts_nodash }}.csv",  # 一意なファイル名
         dest_bucket=S3_BUCKET,
-        replace=True,
+        replace=True,  # 常に上書き
     )
 
-    # 依存関係
+    # ---------- 依存関係 ----------
     create_bq_dataset >> retail_preprocess >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
     ads_preprocess >> ads_metrics >> upload_ads_to_s3
