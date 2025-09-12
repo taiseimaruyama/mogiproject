@@ -46,28 +46,24 @@ jobs:
           echo "date,product,sales,stock" > input/retail.csv
           echo "2025-01-01,A,100,10" >> input/retail.csv
           echo "2025-01-02,A,120,0" >> input/retail.csv
-          echo "date,impressions,clicks,spend,revenue" > input/ads.csv
-          echo "2025-01-01,1000,50,200,500" >> input/ads.csv
-          echo "2025-01-02,800,20,100,150" >> input/ads.csv
 
       # ✅ GCP 認証 JSON をファイル化
       - name: Write gcp-credentials.json
         run: |
           echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
 
-      # ✅ .env ファイル生成
       - name: Write .env file for docker-compose
         run: |
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
           echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
-          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
           echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
 
       - name: Run Airflow init
         run: docker compose run --rm airflow-init
 
-      # ✅ Airflow サービス起動
       - name: Start Airflow services
         run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
@@ -85,7 +81,6 @@ jobs:
           docker compose logs
           exit 1
 
-      # ✅ デバッグログ確認
       - name: Debug Airflow logs
         run: |
           docker compose ps || true
@@ -111,14 +106,20 @@ jobs:
           docker compose exec -T airflow-webserver \
             airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
 
-      - name: Check task state (preprocess_ads)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
+      # ✅ BigQuery Dataset 作成確認
+      - name: Check task state (create_bq_dataset)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag create_bq_dataset 2025-01-01
 
-      - name: Check task state (calc_ads_metrics)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
+      - name: Debug task logs (create_bq_dataset from worker)
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/create_bq_dataset/2025-01-01T00:00:00+00:00/1.log || true
 
-      - name: Check task state (upload_ads_metrics_to_s3)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01
+      - name: Check task state (preprocess_retail)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_retail 2025-01-01
+
+      - name: Check task state (calc_retail_metrics)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_retail_metrics 2025-01-01
 
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
@@ -126,26 +127,8 @@ jobs:
       - name: Check task state (load_retail_metrics_to_bq)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag load_retail_metrics_to_bq 2025-01-01
 
-      # ✅ Airflow Variables 確認
       - name: Debug Airflow variables
-        run: docker compose exec -T airflow-webserver airflow variables list
-
-      # ✅ タスクログ確認（Worker 側）
-      - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
-        run: |
-          docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_retail_metrics_to_gcs/2025-01-01T00:00:00+00:00/1.log || true
-
-      - name: Debug task logs (upload_ads_metrics_to_s3 from worker)
-        run: |
-          docker compose exec -T airflow-worker \
-            cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
-
-      # ✅ BigQuery ロードタスクのログを Webserver 側から確認
-      - name: Debug task logs (load_retail_metrics_to_bq from webserver)
-        run: |
-          docker compose exec -T airflow-webserver \
-            cat /opt/airflow/logs/industry_metrics_full_dag/load_retail_metrics_to_bq/2025-01-01T00:00:00+00:00/1.log || true
+        run: docker compose exec -T airflow-webserver airflow variables list || true
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
@@ -161,9 +144,6 @@ jobs:
 
       - name: Debug worker logs (full)
         run: docker compose logs airflow-worker || true
-
-      - name: Debug worker logs (upload tasks)
-        run: docker compose logs airflow-worker | grep "upload_" || true
 
       - name: Debug worker logs (detailed)
         run: |
