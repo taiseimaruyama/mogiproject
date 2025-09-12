@@ -21,26 +21,26 @@ S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
 
 # BigQuery の設定
 BQ_PROJECT = "striking-yen-470200-u3"
-BQ_DATASET = "analytics_dataset"   # 新しく作成したい Dataset 名
+BQ_DATASET = "analytics_dataset"
 BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 
-# ファイル名ユーティリティ
+# ファイル名ユーティリティ（年+日付+時刻入り）
 def dated_filename(prefix, suffix, ds=None):
     if ds is None:
-        ds = datetime.now().strftime("%Y-%m-%d")
+        ds = datetime.now().strftime("%Y%m%d_%H%M%S")
     return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
 
 # ---------- Retail: 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
     df.loc[df["stock"] < 0, "stock"] = 0
-    out_path = dated_filename("retail_clean", ".csv", ds)
+    out_path = dated_filename("retail_clean", ".csv")
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Retail: KPI ----------
 def calc_retail_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
+    df = pd.read_csv(dated_filename("retail_clean", ".csv"), parse_dates=["date"])
     total_days = df["date"].nunique()
     stockouts = df[df["stock"] == 0]
     stockout_days = stockouts["date"].nunique()
@@ -52,7 +52,7 @@ def calc_retail_metrics(ds=None, **kwargs):
         "stockout_rate": stockout_days / total_days,
         "lost_sales_estimate": avg_sales * stockout_days,
     }
-    out_path = dated_filename("retail_metrics", ".csv", ds)
+    out_path = dated_filename("retail_metrics", ".csv")
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
@@ -61,18 +61,18 @@ def preprocess_ads(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = dated_filename("ads_clean", ".csv", ds)
+    out_path = dated_filename("ads_clean", ".csv")
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Ads: KPI ----------
 def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
+    df = pd.read_csv(dated_filename("ads_clean", ".csv"))
     metrics = {
         "avg_CTR": df["CTR"].mean(),
         "avg_ROAS": df["ROAS"].mean(),
     }
-    out_path = dated_filename("ads_metrics", ".csv", ds)
+    out_path = dated_filename("ads_metrics", ".csv")
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
