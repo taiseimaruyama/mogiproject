@@ -2,7 +2,8 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
-from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
+from airflow.models import Variable
 from datetime import datetime, timedelta
 import pandas as pd
 import os
@@ -12,13 +13,21 @@ INPUT_DIR = "/opt/airflow/input"
 OUTPUT_DIR = "/opt/airflow/output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 実行日を Airflow の execution_date から取得
+# GCS バケット
+GCS_BUCKET = Variable.get("gcs_bucket", default_var="my-gcs-bucket-2025-demo")
+
+# BigQuery の設定
+BQ_PROJECT = "striking-yen-470200-u3"
+BQ_DATASET = "analytics_dataset"   # ✅ 新しく作成したい Dataset 名
+BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
+
+# ファイル名ユーティリティ
 def dated_filename(prefix, suffix, ds=None):
     if ds is None:
         ds = datetime.now().strftime("%Y-%m-%d")
     return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
 
-# ---------- 小売業: 前処理 ----------
+# ---------- 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
     df.loc[df["stock"] < 0, "stock"] = 0
@@ -26,108 +35,74 @@ def preprocess_retail(ds=None, **kwargs):
     df.to_csv(out_path, index=False)
     return out_path
 
-# ---------- 小売業: KPI 計算 ----------
+# ---------- KPI ----------
 def calc_retail_metrics(ds=None, **kwargs):
     df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
-    stockout_rate = (df["stock"] == 0).mean()
-    lost_sales_estimate = df.loc[df["stock"] == 0, "sales"].sum()
-    metrics = pd.DataFrame([{
-        "date": ds,
-        "stockout_rate": stockout_rate,
-        "lost_sales_estimate": lost_sales_estimate,
-    }])
+    total_days = df["date"].nunique()
+    stockouts = df[df["stock"] == 0]
+    stockout_days = stockouts["date"].nunique()
+    avg_sales = df["sales"].mean()
+
+    metrics = {
+        "total_days": total_days,
+        "stockout_days": stockout_days,
+        "stockout_rate": stockout_days / total_days,
+        "lost_sales_estimate": avg_sales * stockout_days,
+    }
     out_path = dated_filename("retail_metrics", ".csv", ds)
-    metrics.to_csv(out_path, index=False)
+    pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
-# ---------- 広告: 前処理 ----------
-def preprocess_ads(ds=None, **kwargs):
-    df = pd.read_csv(f"{INPUT_DIR}/ads.csv", parse_dates=["date"])
-    df["CTR"] = df["clicks"] / df["impressions"]
-    df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = dated_filename("ads_clean", ".csv", ds)
-    df.to_csv(out_path, index=False)
-    return out_path
-
-# ---------- 広告: KPI 計算 ----------
-def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds), parse_dates=["date"])
-    metrics = pd.DataFrame([{
-        "date": ds,
-        "avg_CTR": df["CTR"].mean(),
-        "avg_ROAS": df["ROAS"].mean(),
-    }])
-    out_path = dated_filename("ads_metrics", ".csv", ds)
-    metrics.to_csv(out_path, index=False)
-    return out_path
-
-
-# ---------- DAG 定義 ----------
+# ---------- DAG 設定 ----------
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "email_on_failure": False,
-    "email_on_retry": False,
+    "start_date": datetime(2025, 1, 1),
     "retries": 1,
-    "retry_delay": timedelta(minutes=1),
+    "retry_delay": timedelta(minutes=5),
 }
 
 with DAG(
     dag_id="industry_metrics_full_dag",
     default_args=default_args,
-    description="Retail & Ads metrics DAG (GCS + S3 + BigQuery)",
+    description="Retail metrics pipeline with GCS + BigQuery",
     schedule_interval=None,
-    start_date=datetime(2025, 1, 1),
     catchup=False,
-    tags=["retail", "ads", "bigquery"],
+    tags=["prod", "retail", "bigquery", "gcs"],
 ) as dag:
 
-    # 小売業タスク
-    t1 = PythonOperator(
-        task_id="preprocess_retail",
-        python_callable=preprocess_retail,
+    # ✅ BigQuery Dataset を作成（存在しない場合のみ作成）
+    create_bq_dataset = BigQueryCreateEmptyDatasetOperator(
+        task_id="create_bq_dataset",
+        dataset_id=BQ_DATASET,
+        project_id=BQ_PROJECT,
+        exists_ok=True,  # すでにある場合はスキップ
     )
 
-    t2 = PythonOperator(
-        task_id="calc_retail_metrics",
-        python_callable=calc_retail_metrics,
+    retail_preprocess = PythonOperator(
+        task_id="preprocess_retail", python_callable=preprocess_retail
+    )
+
+    retail_metrics = PythonOperator(
+        task_id="calc_retail_metrics", python_callable=calc_retail_metrics
     )
 
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ds }}/retail_metrics.csv",   # ✅ フォルダ構造
-        bucket=os.environ.get("GCS_BUCKET"),
+        dst="metrics/{{ ds }}/retail_metrics.csv",
+        bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
 
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
-        bucket=os.environ.get("GCS_BUCKET"),
-        source_objects=["metrics/{{ ds }}/retail_metrics.csv"],  # ✅ GCS と揃える
-        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",
+        bucket=GCS_BUCKET,
+        source_objects=["metrics/{{ ds }}/retail_metrics.csv"],
+        destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
-        write_disposition="WRITE_TRUNCATE",  # 毎回上書き
-    )
-
-    # 広告タスク
-    t3 = PythonOperator(
-        task_id="preprocess_ads",
-        python_callable=preprocess_ads,
-    )
-
-    t4 = PythonOperator(
-        task_id="calc_ads_metrics",
-        python_callable=calc_ads_metrics,
-    )
-
-    upload_ads_to_s3 = LocalFilesystemToS3Operator(
-        task_id="upload_ads_metrics_to_s3",
-        filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ ds }}/ads_metrics.csv",
-        dest_bucket=os.environ.get("S3_BUCKET"),
+        write_disposition="WRITE_TRUNCATE",
     )
 
     # 依存関係
-    t1 >> t2 >> upload_retail_to_gcs >> load_retail_to_bq
-    t3 >> t4 >> upload_ads_to_s3
+    create_bq_dataset >> retail_preprocess >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
