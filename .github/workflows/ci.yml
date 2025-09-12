@@ -55,7 +55,7 @@ jobs:
         run: |
           echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
 
-      # ✅ .env ファイル生成（docker compose が自動読み込み）
+      # ✅ .env ファイル生成
       - name: Write .env file for docker-compose
         run: |
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
@@ -130,7 +130,7 @@ jobs:
       - name: Debug Airflow variables
         run: docker compose exec -T airflow-webserver airflow variables list
 
-      # ✅ タスクログ確認（worker 側）
+      # ✅ タスクログ確認（Worker 側）
       - name: Debug task logs (upload_retail_metrics_to_gcs from worker)
         run: |
           docker compose exec -T airflow-worker \
@@ -141,9 +141,10 @@ jobs:
           docker compose exec -T airflow-worker \
             cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
 
-      - name: Debug task logs (load_retail_metrics_to_bq from worker)
+      # ✅ BigQuery ロードタスクのログを Webserver 側から確認
+      - name: Debug task logs (load_retail_metrics_to_bq from webserver)
         run: |
-          docker compose exec -T airflow-worker \
+          docker compose exec -T airflow-webserver \
             cat /opt/airflow/logs/industry_metrics_full_dag/load_retail_metrics_to_bq/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Debug DAG list
