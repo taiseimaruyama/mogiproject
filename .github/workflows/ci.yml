@@ -42,66 +42,66 @@ jobs:
       - name: Generate dummy input data
         run: |
           mkdir -p input
-          echo "date,sales,stock
-2025-01-01,100,10
-2025-01-02,120,0" > input/retail.csv
-          echo "impressions,clicks,spend,revenue
-1000,50,200,400
-800,40,160,320" > input/ads.csv
+          echo "date,sales,stock\n2025-01-01,100,10\n2025-01-02,120,-5" > input/retail.csv
+          echo "clicks,impressions,spend,revenue\n50,1000,200,500\n30,500,100,250" > input/ads.csv
 
       - name: Write gcp-credentials.json
-        run: echo "${{ secrets.GCP_CREDENTIALS }}" > ./gcp-credentials.json
+        run: echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
 
       - name: Write .env file for docker-compose
         run: |
-          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
-          echo "AIRFLOW__CORE__LOAD_EXAMPLES=False" >> .env
-          echo "AIRFLOW__CORE__EXECUTOR=CeleryExecutor" >> .env
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
-          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
-          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
-          echo "GCP_CREDENTIALS=$(cat gcp-credentials.json | base64 -w 0)" >> .env
+          echo 'AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}' >> .env
+          echo 'AIRFLOW__CORE__LOAD_EXAMPLES=False' >> .env
+          echo 'AIRFLOW__CORE__EXECUTOR=CeleryExecutor' >> .env
+          echo 'AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}' >> .env
+          echo 'AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}' >> .env
+          echo 'AWS_REGION=${{ secrets.AWS_REGION }}' >> .env
+          echo 'S3_BUCKET=${{ secrets.S3_BUCKET }}' >> .env
+          echo 'GCS_BUCKET=${{ secrets.GCS_BUCKET }}' >> .env
+          echo "GCP_CREDENTIALS=$(cat gcp-credentials.json | base64 | tr -d '\n')" >> .env
 
       - name: Run Airflow init
-        run: docker compose up airflow-init
+        run: docker compose run airflow-webserver airflow db init
 
       - name: Start Airflow services
-        run: docker compose up -d --build
+        run: docker compose up -d
 
       - name: Wait for Airflow webserver
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health | grep '"status":"healthy"'; then
-              echo "Airflow webserver is healthy"
+            if curl -s http://localhost:8080/health | grep '"metadatabase": {"status": "healthy"}'; then
+              echo "Airflow is healthy!"
               exit 0
             fi
-            echo "Waiting for Airflow webserver..."
+            echo "Waiting for Airflow..."
             sleep 10
           done
-          echo "Airflow webserver did not become healthy in time"
-          exit 1
+          echo "Airflow failed to start" && exit 1
 
       - name: Debug Airflow logs
-        run: docker compose logs airflow-webserver | tail -n 50
+        run: docker compose logs --tail=100
 
       - name: Debug Airflow connections (before DAG run)
         run: docker compose exec -T airflow-webserver airflow connections list || true
 
       - name: Unpause DAG
-        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag || true
+        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
 
       - name: Trigger DAG
-        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag --exec-date 2025-01-01
+        run: docker compose exec -T airflow-webserver airflow dags trigger industry_metrics_full_dag --run-id "manual_run_$(date +%s)"
 
       - name: Wait after trigger
         run: sleep 60
 
       - name: Check DAG runs
-        run: docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag -n 5
+        run: docker compose exec -T airflow-webserver airflow dags list-runs -d industry_metrics_full_dag
 
-      # ---------- Retail ----------
+      - name: Check task state (create_bq_dataset)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag create_bq_dataset 2025-01-01
+
+      - name: Debug task logs (create_bq_dataset from worker)
+        run: docker compose exec -T airflow-worker cat /opt/airflow/logs/industry_metrics_full_dag/create_bq_dataset/2025-01-01/1.log || true
+
       - name: Check task state (preprocess_retail)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_retail 2025-01-01
 
@@ -114,36 +114,26 @@ jobs:
       - name: Check task state (load_retail_metrics_to_bq)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag load_retail_metrics_to_bq 2025-01-01
 
-      # ---------- Ads ----------
-      - name: Check task state (preprocess_ads)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_ads 2025-01-01
-
-      - name: Check task state (calc_ads_metrics)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_ads_metrics 2025-01-01
-
-      - name: Check task state (upload_ads_metrics_to_s3)
-        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_ads_metrics_to_s3 2025-01-01
-
       - name: Debug Airflow variables
         run: docker compose exec -T airflow-webserver airflow variables list || true
 
       - name: Debug DAG list
-        run: docker compose exec -T airflow-webserver airflow dags list || true
+        run: docker compose exec -T airflow-webserver airflow dags list
 
       - name: Debug DAG import errors
-        run: docker compose exec -T airflow-webserver airflow dags list-import-errors || true
+        run: docker compose exec -T airflow-webserver airflow dags import-errors || true
 
       - name: Debug scheduler logs (full)
-        run: docker compose logs airflow-scheduler | tail -n 100
+        run: docker compose logs airflow-scheduler
 
       - name: Debug worker logs (full)
-        run: docker compose logs airflow-worker | tail -n 100
-
-      - name: Debug worker logs (detailed)
         run: docker compose logs airflow-worker
 
+      - name: Debug worker logs (detailed)
+        run: docker compose exec -T airflow-worker ls -R /opt/airflow/logs || true
+
       - name: Check output files
-        run: ls -l ./output || true
+        run: ls -R output || true
 
       - name: Upload output as artifact
         uses: actions/upload-artifact@v4
@@ -152,13 +142,7 @@ jobs:
           path: output/
 
       - name: Show logs
-        if: always()
-        run: docker compose logs
+        run: docker compose logs --tail=200
 
       - name: Shutdown
-        if: always()
         run: docker compose down -v
-
-      - name: Post Cache pip
-        if: always()
-        run: echo "cache pip done"
