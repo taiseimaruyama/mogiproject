@@ -123,7 +123,10 @@ jobs:
       - name: Check task state (upload_retail_metrics_to_gcs)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
 
-      # ✅ Airflow Variables 確認（空のはず）
+      - name: Check task state (load_retail_metrics_to_bq)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag load_retail_metrics_to_bq 2025-01-01
+
+      # ✅ Airflow Variables 確認
       - name: Debug Airflow variables
         run: docker compose exec -T airflow-webserver airflow variables list
 
@@ -137,6 +140,11 @@ jobs:
         run: |
           docker compose exec -T airflow-worker \
             cat /opt/airflow/logs/industry_metrics_full_dag/upload_ads_metrics_to_s3/2025-01-01T00:00:00+00:00/1.log || true
+
+      - name: Debug task logs (load_retail_metrics_to_bq from worker)
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/load_retail_metrics_to_bq/2025-01-01T00:00:00+00:00/1.log || true
 
       - name: Debug DAG list
         run: docker compose exec -T airflow-scheduler airflow dags list
