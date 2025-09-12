@@ -75,11 +75,11 @@ default_args = {
 with DAG(
     dag_id="industry_metrics_full_dag",
     default_args=default_args,
-    description="Retail & Ads metrics DAG",
+    description="Retail & Ads metrics DAG (GCS + S3 + BigQuery)",
     schedule_interval=None,
     start_date=datetime(2025, 1, 1),
     catchup=False,
-    tags=["retail", "ads"],
+    tags=["retail", "ads", "bigquery"],
 ) as dag:
 
     # 小売業タスク
@@ -96,9 +96,18 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ds }}/retail_metrics.csv",   # ✅ 修正ポイント
+        dst="metrics/{{ ds }}/retail_metrics.csv",   # ✅ フォルダ構造
         bucket=os.environ.get("GCS_BUCKET"),
         mime_type="text/csv",
+    )
+
+    load_retail_to_bq = GCSToBigQueryOperator(
+        task_id="load_retail_metrics_to_bq",
+        bucket=os.environ.get("GCS_BUCKET"),
+        source_objects=["metrics/{{ ds }}/retail_metrics.csv"],  # ✅ GCS と揃える
+        destination_project_dataset_table="striking-yen-470200-u3.sales_dataset.retail_metrics",
+        autodetect=True,
+        write_disposition="WRITE_TRUNCATE",  # 毎回上書き
     )
 
     # 広告タスク
@@ -115,10 +124,10 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ ds }}/ads_metrics.csv",   # ✅ S3もフォルダ構造を揃える
+        dest_key="metrics/{{ ds }}/ads_metrics.csv",
         dest_bucket=os.environ.get("S3_BUCKET"),
     )
 
     # 依存関係
-    t1 >> t2 >> upload_retail_to_gcs
+    t1 >> t2 >> upload_retail_to_gcs >> load_retail_to_bq
     t3 >> t4 >> upload_ads_to_s3
