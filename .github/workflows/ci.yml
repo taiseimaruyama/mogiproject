@@ -43,34 +43,34 @@ jobs:
         run: |
           mkdir -p input
           python - <<'EOF'
-import pandas as pd, numpy as np
-# === retail.csv ===
-dates = pd.date_range("2025-01-01","2025-12-31")
-products = ["A","B","C"]
-rows = []
-for d in dates:
-    for p in products:
-        sales = np.random.randint(50,200)
-        stock = np.random.randint(0,100)
-        rows.append([d.strftime("%Y-%m-%d"), p, sales, stock])
-df = pd.DataFrame(rows, columns=["date","product","sales","stock"])
-df.to_csv("input/retail.csv", index=False)
-print("Generated retail.csv with", len(df), "rows")
+          import pandas as pd, numpy as np
+          # === retail.csv ===
+          dates = pd.date_range("2025-01-01","2025-12-31")
+          products = ["A","B","C"]
+          rows = []
+          for d in dates:
+              for p in products:
+                  sales = np.random.randint(50,200)
+                  stock = np.random.randint(0,100)
+                  rows.append([d.strftime("%Y-%m-%d"), p, sales, stock])
+          df = pd.DataFrame(rows, columns=["date","product","sales","stock"])
+          df.to_csv("input/retail.csv", index=False)
+          print("Generated retail.csv with", len(df), "rows")
 
-# === ads.csv ===
-campaigns = ["CAMP1","CAMP2","CAMP3"]
-rows = []
-for d in dates:
-    for c in campaigns:
-        impressions = np.random.randint(1000,10000)
-        clicks = np.random.randint(10, max(11, impressions//10))
-        spend = np.random.randint(500,5000)
-        revenue = int(spend * np.random.uniform(1.2,3.0))
-        rows.append([d.strftime("%Y-%m-%d"),c,impressions,clicks,spend,revenue])
-df = pd.DataFrame(rows, columns=["date","campaign_id","impressions","clicks","spend","revenue"])
-df.to_csv("input/ads.csv", index=False)
-print("Generated ads.csv with", len(df), "rows")
-EOF
+          # === ads.csv ===
+          campaigns = ["CAMP1","CAMP2","CAMP3"]
+          rows = []
+          for d in dates:
+              for c in campaigns:
+                  impressions = np.random.randint(1000,10000)
+                  clicks = np.random.randint(10, max(11, impressions//10))
+                  spend = np.random.randint(500,5000)
+                  revenue = int(spend * np.random.uniform(1.2,3.0))
+                  rows.append([d.strftime("%Y-%m-%d"),c,impressions,clicks,spend,revenue])
+          df = pd.DataFrame(rows, columns=["date","campaign_id","impressions","clicks","spend","revenue"])
+          df.to_csv("input/ads.csv", index=False)
+          print("Generated ads.csv with", len(df), "rows")
+          EOF
 
       - name: Write gcp-credentials.json
         run: |
@@ -133,22 +133,61 @@ EOF
       - name: Check task state (create_bq_dataset)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag create_bq_dataset 2025-01-01
 
+      - name: Debug task logs (create_bq_dataset from worker)
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/create_bq_dataset/2025-01-01T00:00:00+00:00/1.log || true
+
       - name: Check task state (preprocess_retail)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_retail 2025-01-01
 
       - name: Check task state (calc_retail_metrics)
         run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_retail_metrics 2025-01-01
 
+      - name: Check task state (upload_retail_metrics_to_gcs)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01
+
+      - name: Check task state (load_retail_metrics_to_bq)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag load_retail_metrics_to_bq 2025-01-01
+
+      - name: Debug Airflow variables
+        run: docker compose exec -T airflow-webserver airflow variables list || true
+
+      - name: Debug DAG list
+        run: docker compose exec -T airflow-scheduler airflow dags list
+
+      - name: Debug tasks list
+        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
+
+      - name: Debug DAG import errors
+        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
+
+      - name: Debug scheduler logs (full)
+        run: docker compose logs airflow-scheduler || true
+
+      - name: Debug worker logs (full)
+        run: docker compose logs airflow-worker || true
+
+      - name: Debug worker logs (detailed)
+        run: |
+          echo "------ airflow-worker full logs ------"
+          docker compose logs airflow-worker || true
+          echo "------ last 300 lines ------"
+          docker compose logs --tail=300 airflow-worker || true
+
       - name: Check output files
         run: |
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
-          docker compose exec -T airflow-webserver head -n 20 /opt/airflow/output/*.csv || true
+          docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
 
       - name: Upload output as artifact
         uses: actions/upload-artifact@v4
         with:
           name: airflow-output
           path: ./output/*.csv
+
+      - name: Show logs
+        run: docker compose logs --tail=200
 
       - name: Shutdown
         if: always()
