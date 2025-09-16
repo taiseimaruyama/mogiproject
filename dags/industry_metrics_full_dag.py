@@ -35,7 +35,7 @@ def preprocess_retail(**kwargs):
 # ---------- Retail: KPI ----------
 def calc_retail_metrics(**kwargs):
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("retail_clean_")], key=os.path.getctime)
+    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("retail_clean_")], key=lambda f: os.path.getctime(os.path.join(OUTPUT_DIR, f)))
     df = pd.read_csv(os.path.join(OUTPUT_DIR, clean_file), parse_dates=["date"])
     total_days = df["date"].nunique()
     stockouts = df[df["stock"] == 0]
@@ -65,7 +65,7 @@ def preprocess_ads(**kwargs):
 # ---------- Ads: KPI ----------
 def calc_ads_metrics(**kwargs):
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("ads_clean_")], key=os.path.getctime)
+    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("ads_clean_")], key=lambda f: os.path.getctime(os.path.join(OUTPUT_DIR, f)))
     df = pd.read_csv(os.path.join(OUTPUT_DIR, clean_file))
     metrics = {
         "avg_CTR": df["CTR"].mean(),
@@ -110,14 +110,14 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/retail_metrics.csv",  # ← 常に上書き
+        dst="metrics/retail_metrics_{{ ts_nodash }}.csv",  # ✅ 実行時刻入り
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/retail_metrics.csv"],
+        source_objects=["metrics/retail_metrics_{{ ts_nodash }}.csv"],  # ✅ 実行時刻入り
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
@@ -133,7 +133,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/ads_metrics.csv",  # ← 常に上書き
+        dest_key="metrics/ads_metrics_{{ ts_nodash }}.csv",  # ✅ 実行時刻入り
         dest_bucket=S3_BUCKET,
         replace=True,
     )
