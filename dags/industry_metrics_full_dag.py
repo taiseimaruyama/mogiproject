@@ -92,7 +92,7 @@ def calc_ads_metrics(ds=None, **kwargs):
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2025, 1, 1),
+    "start_date": datetime(2025, 1, 1),  # 実行開始基準日
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
@@ -124,14 +124,15 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ ts_nodash }}/retail_metrics.csv",
+        # 実行時刻ではなく「現在のUTC時刻」をフォルダ名にする
+        dst="metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/retail_metrics.csv",
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/{{ ts_nodash }}/retail_metrics.csv"],
+        source_objects=["metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/retail_metrics.csv"],
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
@@ -147,7 +148,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ ts_nodash }}/ads_metrics.csv",
+        dest_key="metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/ads_metrics.csv",
         dest_bucket=S3_BUCKET,
         replace=True,
     )
@@ -155,4 +156,3 @@ with DAG(
     # 依存関係
     create_bq_dataset >> retail_preprocess >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
     ads_preprocess >> ads_metrics >> upload_ads_to_s3
-
