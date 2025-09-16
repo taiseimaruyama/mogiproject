@@ -188,7 +188,6 @@ jobs:
           mkdir -p ./output_clean
           for f in ./output/*.csv; do
             base=$(basename "$f")
-            # アーティファクト用に日付・時刻部分を削除（2025-01-01, 20250101T120000 などに対応）
             clean=$(echo "$base" | sed -E 's/_[0-9]{8}(T[0-9]{6})?//')
             cp "$f" "./output_clean/$clean"
           done
