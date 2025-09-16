@@ -1,142 +1,184 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
-from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
-from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
-from airflow.models import Variable
-from datetime import datetime, timedelta
-import pandas as pd
-import os
+name: CI
 
-# 入出力ディレクトリ
-INPUT_DIR = "/opt/airflow/input"
-OUTPUT_DIR = "/opt/airflow/output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-# GCS / S3 バケット
-GCS_BUCKET = Variable.get("gcs_bucket", default_var="my-gcs-bucket-2025-demo")
-S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-# BigQuery の設定
-BQ_PROJECT = "striking-yen-470200-u3"
-BQ_DATASET = "analytics_dataset"
-BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-# ---------- Retail: 前処理 ----------
-def preprocess_retail(**kwargs):
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
-    df.loc[df["stock"] < 0, "stock"] = 0
-    out_path = os.path.join(OUTPUT_DIR, f"retail_clean_{ts}.csv")
-    df.to_csv(out_path, index=False)
-    return out_path
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-# ---------- Retail: KPI ----------
-def calc_retail_metrics(**kwargs):
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("retail_clean_")], key=lambda f: os.path.getctime(os.path.join(OUTPUT_DIR, f)))
-    df = pd.read_csv(os.path.join(OUTPUT_DIR, clean_file), parse_dates=["date"])
-    total_days = df["date"].nunique()
-    stockouts = df[df["stock"] == 0]
-    stockout_days = stockouts["date"].nunique()
-    avg_sales = df["sales"].mean()
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-    metrics = {
-        "total_days": total_days,
-        "stockout_days": stockout_days,
-        "stockout_rate": stockout_days / total_days,
-        "lost_sales_estimate": avg_sales * stockout_days,
-    }
-    out_path = os.path.join(OUTPUT_DIR, f"retail_metrics_{ts}.csv")
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
-    return out_path
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools wheel
 
-# ---------- Ads: 前処理 ----------
-def preprocess_ads(**kwargs):
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
-    df["CTR"] = df["clicks"] / df["impressions"]
-    df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = os.path.join(OUTPUT_DIR, f"ads_clean_{ts}.csv")
-    df.to_csv(out_path, index=False)
-    return out_path
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-# ---------- Ads: KPI ----------
-def calc_ads_metrics(**kwargs):
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    clean_file = max([f for f in os.listdir(OUTPUT_DIR) if f.startswith("ads_clean_")], key=lambda f: os.path.getctime(os.path.join(OUTPUT_DIR, f)))
-    df = pd.read_csv(os.path.join(OUTPUT_DIR, clean_file))
-    metrics = {
-        "avg_CTR": df["CTR"].mean(),
-        "avg_ROAS": df["ROAS"].mean(),
-    }
-    out_path = os.path.join(OUTPUT_DIR, f"ads_metrics_{ts}.csv")
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
-    return out_path
+      - name: Initialize Airflow directories
+        run: |
+          sudo mkdir -p ./logs ./dags ./plugins ./input ./output
+          sudo chmod -R 777 ./logs ./dags ./plugins ./input ./output
 
-# ---------- DAG 設定 ----------
-default_args = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime(2025, 1, 1),
-    "retries": 1,
-    "retry_delay": timedelta(minutes=5),
-}
+      # ✅ ダミーデータ生成
+      - name: Generate dummy input data
+        run: |
+          mkdir -p input
+          echo "date,product,sales,stock" > input/retail.csv
+          echo "2025-01-01,A,100,10" >> input/retail.csv
+          echo "2025-01-02,A,120,0" >> input/retail.csv
+          echo "clicks,impressions,spend,revenue" > input/ads.csv
+          echo "50,1000,200,400" >> input/ads.csv
 
-with DAG(
-    dag_id="industry_metrics_full_dag",
-    default_args=default_args,
-    description="Retail & Ads KPI pipeline with GCS + S3 + BigQuery",
-    schedule_interval=None,
-    catchup=False,
-    tags=["prod", "retail", "ads", "bigquery", "s3"],
-) as dag:
+      # ✅ GCP 認証 JSON をファイル化
+      - name: Write gcp-credentials.json
+        run: |
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp-credentials.json
 
-    create_bq_dataset = BigQueryCreateEmptyDatasetOperator(
-        task_id="create_bq_dataset",
-        dataset_id=BQ_DATASET,
-        project_id=BQ_PROJECT,
-        exists_ok=True,
-    )
+      - name: Write .env file for docker-compose
+        run: |
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.AIRFLOW_FERNET_KEY }}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "GCS_BUCKET=${{ secrets.GCS_BUCKET }}" >> .env
+          echo "S3_BUCKET=${{ secrets.S3_BUCKET }}" >> .env
 
-    # Retail pipeline
-    retail_preprocess = PythonOperator(
-        task_id="preprocess_retail", python_callable=preprocess_retail
-    )
-    retail_metrics = PythonOperator(
-        task_id="calc_retail_metrics", python_callable=calc_retail_metrics
-    )
-    upload_retail_to_gcs = LocalFilesystemToGCSOperator(
-        task_id="upload_retail_metrics_to_gcs",
-        src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/retail_metrics_{{ ts_nodash }}.csv",  # ✅ 実行時刻入り
-        bucket=GCS_BUCKET,
-        mime_type="text/csv",
-    )
-    load_retail_to_bq = GCSToBigQueryOperator(
-        task_id="load_retail_metrics_to_bq",
-        bucket=GCS_BUCKET,
-        source_objects=["metrics/retail_metrics_{{ ts_nodash }}.csv"],  # ✅ 実行時刻入り
-        destination_project_dataset_table=BQ_TABLE,
-        autodetect=True,
-        write_disposition="WRITE_TRUNCATE",
-    )
+      - name: Run Airflow init
+        run: docker compose run --rm airflow-init
 
-    # Ads pipeline
-    ads_preprocess = PythonOperator(
-        task_id="preprocess_ads", python_callable=preprocess_ads
-    )
-    ads_metrics = PythonOperator(
-        task_id="calc_ads_metrics", python_callable=calc_ads_metrics
-    )
-    upload_ads_to_s3 = LocalFilesystemToS3Operator(
-        task_id="upload_ads_metrics_to_s3",
-        filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/ads_metrics_{{ ts_nodash }}.csv",  # ✅ 実行時刻入り
-        dest_bucket=S3_BUCKET,
-        replace=True,
-    )
+      - name: Start Airflow services
+        run: docker compose up -d --build airflow-webserver airflow-scheduler airflow-worker
 
-    create_bq_dataset >> retail_preprocess >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
-    ads_preprocess >> ads_metrics >> upload_ads_to_s3
+      - name: Wait for Airflow webserver
+        run: |
+          for i in {1..90}; do
+            if docker compose exec -T airflow-webserver curl -s http://localhost:8080/health | grep -q "healthy"; then
+              echo "Airflow is healthy!"
+              exit 0
+            fi
+            echo "Waiting for Airflow... ($i/90)"
+            sleep 10
+          done
+          echo "Airflow did not become healthy in time."
+          docker compose logs
+          exit 1
+
+      - name: Debug Airflow logs
+        run: |
+          docker compose ps || true
+          docker compose logs airflow-webserver || true
+          docker compose logs airflow-scheduler || true
+
+      - name: Debug Airflow connections (before DAG run)
+        run: docker compose exec -T airflow-webserver airflow connections list
+
+      - name: Unpause DAG
+        run: docker compose exec -T airflow-webserver airflow dags unpause industry_metrics_full_dag
+
+      - name: Trigger DAG
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags trigger -e 2025-01-01 industry_metrics_full_dag
+
+      - name: Wait after trigger
+        run: sleep 60
+
+      - name: Check DAG runs
+        run: |
+          docker compose exec -T airflow-webserver \
+            airflow dags list-runs -d industry_metrics_full_dag | tail -n 20
+
+      # ---------- Task 状態チェック ----------
+      - name: Check task state (create_bq_dataset)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag create_bq_dataset 2025-01-01 || true
+
+      - name: Debug task logs (create_bq_dataset from worker)
+        run: |
+          docker compose exec -T airflow-worker \
+            cat /opt/airflow/logs/industry_metrics_full_dag/create_bq_dataset/2025-01-01T00:00:00+00:00/1.log || true
+
+      - name: Check task state (preprocess_retail)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag preprocess_retail 2025-01-01 || true
+
+      - name: Check task state (calc_retail_metrics)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag calc_retail_metrics 2025-01-01 || true
+
+      - name: Check task state (upload_retail_metrics_to_gcs)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag upload_retail_metrics_to_gcs 2025-01-01 || true
+
+      - name: Check task state (load_retail_metrics_to_bq)
+        run: docker compose exec -T airflow-webserver airflow tasks state industry_metrics_full_dag load_retail_metrics_to_bq 2025-01-01 || true
+
+      # ---------- GCS / S3 アップロード確認 ----------
+      - name: Debug GCS uploaded files
+        run: |
+          docker compose exec -T airflow-webserver \
+            gsutil ls gs://${{ secrets.GCS_BUCKET }}/metrics/ || true
+
+      - name: Debug S3 uploaded files
+        run: |
+          docker compose exec -T airflow-webserver \
+            aws s3 ls s3://${{ secrets.S3_BUCKET }}/metrics/ --recursive || true
+
+      - name: Debug Airflow variables
+        run: docker compose exec -T airflow-webserver airflow variables list || true
+
+      - name: Debug DAG list
+        run: docker compose exec -T airflow-scheduler airflow dags list
+
+      - name: Debug tasks list
+        run: docker compose exec -T airflow-scheduler airflow tasks list industry_metrics_full_dag
+
+      - name: Debug DAG import errors
+        run: docker compose exec -T airflow-scheduler airflow dags list-import-errors || true
+
+      - name: Debug scheduler logs (full)
+        run: docker compose logs airflow-scheduler || true
+
+      - name: Debug worker logs (full)
+        run: docker compose logs airflow-worker || true
+
+      - name: Debug worker logs (detailed)
+        run: |
+          echo "------ airflow-worker full logs ------"
+          docker compose logs airflow-worker || true
+          echo "------ last 300 lines ------"
+          docker compose logs --tail=300 airflow-worker || true
+
+      - name: Check output files
+        run: |
+          docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
+          docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
+
+      - name: Upload output as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: airflow-output
+          path: ./output/*.csv
+
+      - name: Show logs
+        run: docker compose logs --tail=200
+
+      - name: Shutdown
+        if: always()
+        run: docker compose down
