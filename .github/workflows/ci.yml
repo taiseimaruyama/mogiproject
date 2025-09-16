@@ -180,11 +180,24 @@ jobs:
           docker compose exec -T airflow-webserver ls -l /opt/airflow/output || true
           docker compose exec -T airflow-webserver cat /opt/airflow/output/*.csv || true
 
+      - name: Copy output files to host
+        run: docker compose cp airflow-webserver:/opt/airflow/output ./output
+
+      - name: Rename output files (remove date)
+        run: |
+          mkdir -p ./output_clean
+          for f in ./output/*.csv; do
+            base=$(basename "$f")
+            clean=$(echo "$base" | sed -E 's/_[0-9]{4}-[0-9]{2}-[0-9]{2}//')
+            cp "$f" "./output_clean/$clean"
+          done
+          ls -l ./output_clean
+
       - name: Upload output as artifact
         uses: actions/upload-artifact@v4
         with:
           name: airflow-output
-          path: ./output/*.csv
+          path: ./output_clean/*.csv
 
       - name: Show logs
         run: docker compose logs --tail=200
