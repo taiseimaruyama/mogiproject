@@ -47,22 +47,25 @@ def preprocess_retail(ds=None, **kwargs):
     print(f"[Retail Preprocess] 生成ファイル: {out_path}")
     return out_path
 
-# ---------- Retail: KPI ----------
+# ---------- Retail: KPI（日ごと推移版） ----------
 def calc_retail_metrics(ds=None, **kwargs):
     df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
-    total_days = df["date"].nunique()
-    stockouts = df[df["stock"] == 0]
-    stockout_days = stockouts["date"].nunique()
-    avg_sales = df["sales"].mean()
 
-    metrics = {
-        "total_days": total_days,
-        "stockout_days": stockout_days,
-        "stockout_rate": stockout_days / total_days if total_days else 0,
-        "lost_sales_estimate": avg_sales * stockout_days if avg_sales else 0,
-    }
+    # 日ごとに KPI を計算
+    metrics = []
+    for d, g in df.groupby("date"):
+        stockout_flag = 1 if (g["stock"] == 0).any() else 0
+        avg_sales = g["sales"].mean()
+
+        metrics.append({
+            "date": d.strftime("%Y-%m-%d"),
+            "stockout_flag": stockout_flag,                 # 欠品日かどうか
+            "stockout_rate": stockout_flag,                 # 日単位なので 0 or 1
+            "lost_sales_estimate": avg_sales * stockout_flag
+        })
+
     out_path = dated_filename("retail_metrics", ".csv", ds)
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
+    pd.DataFrame(metrics).to_csv(out_path, index=False)
     print(f"[Retail Metrics] 生成ファイル: {out_path}")
     return out_path
 
@@ -124,7 +127,6 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        # 実行時刻ではなく「現在のUTC時刻」をフォルダ名にする
         dst="metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/retail_metrics.csv",
         bucket=GCS_BUCKET,
         mime_type="text/csv",
