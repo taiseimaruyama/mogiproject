@@ -54,7 +54,7 @@ def calc_retail_metrics(ds=None, **kwargs):
     # 日ごとに KPI を計算
     metrics = []
     for d, g in df.groupby("date"):
-        stockout_flag = 1 if (g["stock"] == 0).any() else 0
+        stockout_flag = 1 if (g["stock"] <= 0).any() else 0
         avg_sales = g["sales"].mean()
 
         metrics.append({
@@ -66,7 +66,7 @@ def calc_retail_metrics(ds=None, **kwargs):
 
     out_path = dated_filename("retail_metrics", ".csv", ds)
     pd.DataFrame(metrics).to_csv(out_path, index=False)
-    print(f"[Retail Metrics] 生成ファイル: {out_path}")
+    print(f"[Retail Metrics] 生成ファイル: {out_path} ({len(metrics)}行)")
     return out_path
 
 # ---------- Ads: 前処理 ----------
