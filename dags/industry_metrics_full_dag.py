@@ -155,3 +155,4 @@ with DAG(
     # 依存関係
     create_bq_dataset >> retail_preprocess >> retail_metrics >> upload_retail_to_gcs >> load_retail_to_bq
     ads_preprocess >> ads_metrics >> upload_ads_to_s3
+
