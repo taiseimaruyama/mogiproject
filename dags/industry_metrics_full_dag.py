@@ -21,15 +21,16 @@ S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
 
 # BigQuery の設定
 BQ_PROJECT = "striking-yen-470200-u3"
-BQ_DATASET = "analytics_dataset"
+BQ_DATASET = "analytics_dataset"   # 新しく作成したい Dataset 名
 BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 
-# ---------- ファイル名ユーティリティ ----------
-def dated_filename(prefix, suffix, ts=None):
-    """実行時刻入りのファイル名を生成（安全な形式: コロンなし）"""
-    if ts is None:
-        ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    return os.path.join(OUTPUT_DIR, f"{prefix}_{ts}{suffix}")
+# ファイル名ユーティリティ (安全なフォーマット: YYYYMMDDTHHMMSS)
+def dated_filename(prefix, suffix, use_now=True):
+    if use_now:
+        ds = datetime.now().strftime("%Y%m%dT%H%M%S")
+    else:
+        ds = datetime.now().strftime("%Y-%m-%d")
+    return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
 
 # ---------- Retail: 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
@@ -41,7 +42,7 @@ def preprocess_retail(ds=None, **kwargs):
 
 # ---------- Retail: KPI ----------
 def calc_retail_metrics(ds=None, **kwargs):
-    df = pd.read_csv(kwargs["ti"].xcom_pull(task_ids="preprocess_retail"), parse_dates=["date"])
+    df = pd.read_csv(dated_filename("retail_clean", ".csv"), parse_dates=["date"])
     total_days = df["date"].nunique()
     stockouts = df[df["stock"] == 0]
     stockout_days = stockouts["date"].nunique()
@@ -68,7 +69,7 @@ def preprocess_ads(ds=None, **kwargs):
 
 # ---------- Ads: KPI ----------
 def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(kwargs["ti"].xcom_pull(task_ids="preprocess_ads"))
+    df = pd.read_csv(dated_filename("ads_clean", ".csv"))
     metrics = {
         "avg_CTR": df["CTR"].mean(),
         "avg_ROAS": df["ROAS"].mean(),
@@ -113,7 +114,7 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/retail_metrics.csv",  # 実行時刻入りのファイル名は Python 側で生成
+        dst="metrics/retail_metrics.csv",
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
@@ -136,7 +137,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/ads_metrics.csv",  # 実行時刻入りのファイル名は Python 側で生成
+        dest_key="metrics/ads_metrics.csv",
         dest_bucket=S3_BUCKET,
         replace=True,
     )
