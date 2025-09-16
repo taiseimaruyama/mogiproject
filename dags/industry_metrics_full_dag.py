@@ -70,7 +70,7 @@ def calc_retail_metrics(ds=None, **kwargs):
 
 # ---------- Ads: 前処理 ----------
 def preprocess_ads(ds=None, **kwargs):
-    df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
+    df = pd.read_csv(f"{INPUT_DIR}/ads.csv", parse_dates=["date"])
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
     out_path = dated_filename("ads_clean", ".csv", ds)
@@ -78,16 +78,23 @@ def preprocess_ads(ds=None, **kwargs):
     print(f"[Ads Preprocess] 生成ファイル: {out_path}")
     return out_path
 
-# ---------- Ads: KPI ----------
+# ---------- Ads: KPI（日ごと推移版） ----------
 def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
-    metrics = {
-        "avg_CTR": df["CTR"].mean(),
-        "avg_ROAS": df["ROAS"].mean(),
-    }
+    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds), parse_dates=["date"])
+
+    metrics = []
+    for d, g in df.groupby("date"):
+        avg_ctr = g["CTR"].mean()
+        avg_roas = g["ROAS"].mean()
+        metrics.append({
+            "date": d.strftime("%Y-%m-%d"),
+            "avg_CTR": avg_ctr,
+            "avg_ROAS": avg_roas,
+        })
+
     out_path = dated_filename("ads_metrics", ".csv", ds)
-    pd.DataFrame([metrics]).to_csv(out_path, index=False)
-    print(f"[Ads Metrics] 生成ファイル: {out_path}")
+    pd.DataFrame(metrics).to_csv(out_path, index=False)
+    print(f"[Ads Metrics] 生成ファイル: {out_path} ({len(metrics)}行)")
     return out_path
 
 # ---------- DAG 設定 ----------
