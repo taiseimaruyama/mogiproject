@@ -27,7 +27,7 @@ BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 # ---------- ファイル名ユーティリティ ----------
 def dated_filename(prefix, suffix, ds=None):
     """
-    ファイル名にコロン(:)を入れず、常に安全なフォーマット (YYYYMMDDTHHMMSS)
+    ファイル名に安全なタイムスタンプ (YYYYMMDDTHHMMSS) を付与
     """
     if ds is None:
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
@@ -44,6 +44,7 @@ def preprocess_retail(ds=None, **kwargs):
     df.loc[df["stock"] < 0, "stock"] = 0
     out_path = dated_filename("retail_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
+    print(f"[Retail Preprocess] 生成ファイル: {out_path}")
     return out_path
 
 # ---------- Retail: KPI ----------
@@ -57,11 +58,12 @@ def calc_retail_metrics(ds=None, **kwargs):
     metrics = {
         "total_days": total_days,
         "stockout_days": stockout_days,
-        "stockout_rate": stockout_days / total_days,
-        "lost_sales_estimate": avg_sales * stockout_days,
+        "stockout_rate": stockout_days / total_days if total_days else 0,
+        "lost_sales_estimate": avg_sales * stockout_days if avg_sales else 0,
     }
     out_path = dated_filename("retail_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
+    print(f"[Retail Metrics] 生成ファイル: {out_path}")
     return out_path
 
 # ---------- Ads: 前処理 ----------
@@ -71,6 +73,7 @@ def preprocess_ads(ds=None, **kwargs):
     df["ROAS"] = df["revenue"] / df["spend"]
     out_path = dated_filename("ads_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
+    print(f"[Ads Preprocess] 生成ファイル: {out_path}")
     return out_path
 
 # ---------- Ads: KPI ----------
@@ -82,6 +85,7 @@ def calc_ads_metrics(ds=None, **kwargs):
     }
     out_path = dated_filename("ads_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
+    print(f"[Ads Metrics] 生成ファイル: {out_path}")
     return out_path
 
 # ---------- DAG 設定 ----------
