@@ -21,28 +21,34 @@ S3_BUCKET = Variable.get("s3_bucket", default_var="domoproject")
 
 # BigQuery の設定
 BQ_PROJECT = "striking-yen-470200-u3"
-BQ_DATASET = "analytics_dataset"   # 新しく作成したい Dataset 名
+BQ_DATASET = "analytics_dataset"
 BQ_TABLE = f"{BQ_PROJECT}.{BQ_DATASET}.retail_metrics"
 
-# ファイル名ユーティリティ (安全なフォーマット: YYYYMMDDTHHMMSS)
-def dated_filename(prefix, suffix, use_now=True):
-    if use_now:
-        ds = datetime.now().strftime("%Y%m%dT%H%M%S")
+# ---------- ファイル名ユーティリティ ----------
+def dated_filename(prefix, suffix, ds=None):
+    """
+    ファイル名にコロン(:)を入れず、常に安全なフォーマット (YYYYMMDDTHHMMSS)
+    """
+    if ds is None:
+        ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
     else:
-        ds = datetime.now().strftime("%Y-%m-%d")
-    return os.path.join(OUTPUT_DIR, f"{prefix}_{ds}{suffix}")
+        try:
+            ts = datetime.strptime(ds, "%Y-%m-%d").strftime("%Y%m%d")
+        except Exception:
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    return os.path.join(OUTPUT_DIR, f"{prefix}_{ts}{suffix}")
 
 # ---------- Retail: 前処理 ----------
 def preprocess_retail(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/retail.csv", parse_dates=["date"])
     df.loc[df["stock"] < 0, "stock"] = 0
-    out_path = dated_filename("retail_clean", ".csv")
+    out_path = dated_filename("retail_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Retail: KPI ----------
 def calc_retail_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("retail_clean", ".csv"), parse_dates=["date"])
+    df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
     total_days = df["date"].nunique()
     stockouts = df[df["stock"] == 0]
     stockout_days = stockouts["date"].nunique()
@@ -54,7 +60,7 @@ def calc_retail_metrics(ds=None, **kwargs):
         "stockout_rate": stockout_days / total_days,
         "lost_sales_estimate": avg_sales * stockout_days,
     }
-    out_path = dated_filename("retail_metrics", ".csv")
+    out_path = dated_filename("retail_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
@@ -63,18 +69,18 @@ def preprocess_ads(ds=None, **kwargs):
     df = pd.read_csv(f"{INPUT_DIR}/ads.csv")
     df["CTR"] = df["clicks"] / df["impressions"]
     df["ROAS"] = df["revenue"] / df["spend"]
-    out_path = dated_filename("ads_clean", ".csv")
+    out_path = dated_filename("ads_clean", ".csv", ds)
     df.to_csv(out_path, index=False)
     return out_path
 
 # ---------- Ads: KPI ----------
 def calc_ads_metrics(ds=None, **kwargs):
-    df = pd.read_csv(dated_filename("ads_clean", ".csv"))
+    df = pd.read_csv(dated_filename("ads_clean", ".csv", ds))
     metrics = {
         "avg_CTR": df["CTR"].mean(),
         "avg_ROAS": df["ROAS"].mean(),
     }
-    out_path = dated_filename("ads_metrics", ".csv")
+    out_path = dated_filename("ads_metrics", ".csv", ds)
     pd.DataFrame([metrics]).to_csv(out_path, index=False)
     return out_path
 
@@ -114,14 +120,14 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/retail_metrics.csv",
+        dst="metrics/{{ ts_nodash }}/retail_metrics.csv",
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/retail_metrics.csv"],
+        source_objects=["metrics/{{ ts_nodash }}/retail_metrics.csv"],
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
@@ -137,7 +143,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/ads_metrics.csv",
+        dest_key="metrics/{{ ts_nodash }}/ads_metrics.csv",
         dest_bucket=S3_BUCKET,
         replace=True,
     )
