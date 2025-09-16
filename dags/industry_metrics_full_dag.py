@@ -51,7 +51,6 @@ def preprocess_retail(ds=None, **kwargs):
 def calc_retail_metrics(ds=None, **kwargs):
     df = pd.read_csv(dated_filename("retail_clean", ".csv", ds), parse_dates=["date"])
 
-    # 日ごとに KPI を計算
     metrics = []
     for d, g in df.groupby("date"):
         stockout_flag = 1 if (g["stock"] <= 0).any() else 0
@@ -59,8 +58,8 @@ def calc_retail_metrics(ds=None, **kwargs):
 
         metrics.append({
             "date": d.strftime("%Y-%m-%d"),
-            "stockout_flag": stockout_flag,                 # 欠品日かどうか
-            "stockout_rate": stockout_flag,                 # 日単位なので 0 or 1
+            "stockout_flag": stockout_flag,
+            "stockout_rate": stockout_flag,  # 日単位なので 0 or 1
             "lost_sales_estimate": avg_sales * stockout_flag
         })
 
@@ -95,7 +94,7 @@ def calc_ads_metrics(ds=None, **kwargs):
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2025, 1, 1),  # 実行開始基準日
+    "start_date": datetime(2025, 1, 1),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
