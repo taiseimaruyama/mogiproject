@@ -133,14 +133,14 @@ with DAG(
     upload_retail_to_gcs = LocalFilesystemToGCSOperator(
         task_id="upload_retail_metrics_to_gcs",
         src="{{ ti.xcom_pull(task_ids='calc_retail_metrics') }}",
-        dst="metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/retail_metrics.csv",
+        dst="metrics/{{ ts_nodash }}/retail_metrics.csv",   # 修正: Airflow マクロを利用
         bucket=GCS_BUCKET,
         mime_type="text/csv",
     )
     load_retail_to_bq = GCSToBigQueryOperator(
         task_id="load_retail_metrics_to_bq",
         bucket=GCS_BUCKET,
-        source_objects=["metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/retail_metrics.csv"],
+        source_objects=["metrics/{{ ts_nodash }}/retail_metrics.csv"],  # 修正: 同じマクロを利用
         destination_project_dataset_table=BQ_TABLE,
         autodetect=True,
         write_disposition="WRITE_TRUNCATE",
@@ -156,7 +156,7 @@ with DAG(
     upload_ads_to_s3 = LocalFilesystemToS3Operator(
         task_id="upload_ads_metrics_to_s3",
         filename="{{ ti.xcom_pull(task_ids='calc_ads_metrics') }}",
-        dest_key="metrics/{{ macros.datetime.utcnow().strftime('%Y%m%dT%H%M%S') }}/ads_metrics.csv",
+        dest_key="metrics/{{ ts_nodash }}/ads_metrics.csv",   # 修正
         dest_bucket=S3_BUCKET,
         replace=True,
     )
